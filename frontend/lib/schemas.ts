@@ -17,6 +17,8 @@ export const exerciseRowSchema = z
     reps: z.coerce.number().int('整数で入力してください').positive('1 以上で入力してください'),
     sets: z.coerce.number().int('整数で入力してください').positive('1 以上で入力してください'),
     notes: z.string().optional(),
+    // どのプリセット由来か（純クライアント状態・サーバへは送らない）。編集で null になる。
+    sourcePreset: z.string().nullable().optional(),
   })
   .superRefine((val, ctx) => {
     if (!val.bodyweight) {

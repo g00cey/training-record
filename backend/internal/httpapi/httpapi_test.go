@@ -273,74 +273,190 @@ func TestSpinRPEAuto(t *testing.T) {
 	}
 }
 
-func TestRoutineEndpoints(t *testing.T) {
+func TestPresetEndpoints(t *testing.T) {
 	c := newClient(t)
 
-	// no routine -> 404 with "no routine"
+	// empty list
+	if list := decode(t, c.req("GET", "/api/presets", ""))["presets"].([]any); len(list) != 0 {
+		t.Fatalf("expected empty preset list, got %v", list)
+	}
+
+	// create
+	w := c.req("POST", "/api/presets", `{"name":"自重","sortOrder":0}`)
+	if w.Code != 201 || decode(t, w)["sortOrder"].(float64) != 0 {
+		t.Fatalf("create 自重: %d (%s)", w.Code, w.Body.String())
+	}
+	if w = c.req("POST", "/api/presets", `{"name":"FW"}`); w.Code != 201 {
+		t.Fatalf("create FW: %d (%s)", w.Code, w.Body.String())
+	}
+	// duplicate -> 409
+	if w = c.req("POST", "/api/presets", `{"name":"自重"}`); w.Code != 409 ||
+		decode(t, w)["error"].(map[string]any)["code"] != "conflict" {
+		t.Fatalf("dup preset: %d (%s)", w.Code, w.Body.String())
+	}
+
+	// unknown preset -> 404
+	if w = c.req("GET", "/api/presets/"+urlSeg("自重"), ""); w.Code != 404 {
+		t.Fatalf("preset with no snapshot should 404: %d (%s)", w.Code, w.Body.String())
+	}
+
+	// PUT preset (creates first snapshot, explicit date)
+	w = c.req("PUT", "/api/presets/"+urlSeg("自重"), `{"date":"2026-07-30","exercises":[
+		{"name":"懸垂","weight":null,"reps":10,"sets":1},
+		{"name":"ディップス","weight":null,"reps":30}
+	]}`)
+	if w.Code != 200 {
+		t.Fatalf("put 自重: %d (%s)", w.Code, w.Body.String())
+	}
+	m := decode(t, w)
+	if m["name"] != "自重" || m["date"] != "2026-07-30" || len(m["exercises"].([]any)) != 2 {
+		t.Fatalf("put 自重 body: %v", m)
+	}
+	if _, ok := m["exercises"].([]any)[0].(map[string]any)["name"]; !ok {
+		t.Fatalf("preset exercise must use key 'name': %v", m["exercises"])
+	}
+
+	// PUT again with a new (default = today) date -> history +1
+	w = c.req("PUT", "/api/presets/"+urlSeg("自重"), `{"exercises":[{"name":"懸垂","weight":null,"reps":12}]}`)
+	if w.Code != 200 {
+		t.Fatalf("put 自重 #2: %d (%s)", w.Code, w.Body.String())
+	}
+	todayDate := decode(t, w)["date"].(string)
+	hist := decode(t, c.req("GET", "/api/presets/"+urlSeg("自重")+"/history", ""))["snapshots"].([]any)
+	if len(hist) != 2 {
+		t.Fatalf("history should be 2 after second PUT: %v", hist)
+	}
+	if hist[0].(map[string]any)["date"] != todayDate {
+		t.Fatalf("history not date-desc: %v", hist)
+	}
+
+	// GET current preset -> latest snapshot
+	w = c.req("GET", "/api/presets/"+urlSeg("自重"), "")
+	m = decode(t, w)
+	if m["date"] != todayDate || len(m["exercises"].([]any)) != 1 {
+		t.Fatalf("get current 自重: %v", m)
+	}
+
+	// GET historical snapshot by date
+	w = c.req("GET", "/api/presets/"+urlSeg("自重")+"/2026-07-30", "")
+	if w.Code != 200 || len(decode(t, w)["exercises"].([]any)) != 2 {
+		t.Fatalf("get 自重 2026-07-30: %d (%s)", w.Code, w.Body.String())
+	}
+	if w = c.req("GET", "/api/presets/"+urlSeg("自重")+"/2000-01-01", ""); w.Code != 404 {
+		t.Fatalf("missing dated snapshot: %d", w.Code)
+	}
+
+	// PATCH in-place: existing -> updated, same snapshot date
+	w = c.req("PATCH", "/api/presets/"+urlSeg("自重")+"/exercises/"+urlSeg("懸垂"), `{"reps":15}`)
+	m = decode(t, w)
+	if w.Code != 200 || m["action"] != "updated" || m["preset"] != "自重" || m["presetDate"] != todayDate {
+		t.Fatalf("patch updated: %d (%v)", w.Code, m)
+	}
+	// PATCH missing -> added
+	w = c.req("PATCH", "/api/presets/"+urlSeg("自重")+"/exercises/"+urlSeg("新種目"), `{"reps":20}`)
+	if decode(t, w)["action"] != "added" {
+		t.Fatalf("patch added: %s", w.Body.String())
+	}
+	// history unchanged by PATCH (still 2)
+	if h := decode(t, c.req("GET", "/api/presets/"+urlSeg("自重")+"/history", ""))["snapshots"].([]any); len(h) != 2 {
+		t.Fatalf("PATCH must not add history: %v", h)
+	}
+	// PATCH unknown preset -> 404
+	if w = c.req("PATCH", "/api/presets/"+urlSeg("未登録")+"/exercises/"+urlSeg("懸垂"), `{"reps":1}`); w.Code != 404 {
+		t.Fatalf("patch unknown preset: %d", w.Code)
+	}
+
+	// list with summaries
+	list := decode(t, c.req("GET", "/api/presets", ""))["presets"].([]any)
+	if len(list) != 2 {
+		t.Fatalf("preset list len: %v", list)
+	}
+	p0 := list[0].(map[string]any)
+	if p0["name"] != "自重" || p0["sortOrder"].(float64) != 0 || p0["latestDate"] != todayDate {
+		t.Fatalf("preset[0] summary: %v", p0)
+	}
+
+	// reorder
+	w = c.req("PUT", "/api/presets:reorder", `{"order":["FW","自重"]}`)
+	rp := decode(t, w)["presets"].([]any)
+	if w.Code != 200 || rp[0].(map[string]any)["name"] != "FW" || rp[0].(map[string]any)["sortOrder"].(float64) != 0 {
+		t.Fatalf("reorder: %d (%s)", w.Code, w.Body.String())
+	}
+
+	// delete preset -> snapshots gone
+	if w = c.req("DELETE", "/api/presets/"+urlSeg("自重"), ""); w.Code != 204 {
+		t.Fatalf("delete 自重: %d", w.Code)
+	}
+	if w = c.req("GET", "/api/presets/"+urlSeg("自重")+"/history", ""); w.Code != 404 {
+		t.Fatalf("history after delete should 404 (preset gone): %d", w.Code)
+	}
+	if w = c.req("DELETE", "/api/presets/"+urlSeg("自重"), ""); w.Code != 404 {
+		t.Fatalf("re-delete: %d", w.Code)
+	}
+}
+
+func TestLegacyRoutineView(t *testing.T) {
+	c := newClient(t)
+
+	// no presets -> 404
 	w := c.req("GET", "/api/routine", "")
 	if w.Code != 404 || decode(t, w)["error"].(map[string]any)["message"] != "no routine" {
 		t.Fatalf("empty routine: %d (%s)", w.Code, w.Body.String())
 	}
 
-	// put routine with explicit date
-	w = c.req("PUT", "/api/routine", `{"date":"2026-07-30","exercises":[
-		{"name":"ヒップストラスト","weight":40,"reps":40,"sets":1},
-		{"name":"懸垂","weight":null,"reps":10}
-	]}`)
-	if w.Code != 200 {
-		t.Fatalf("put routine code = %d (%s)", w.Code, w.Body.String())
-	}
-	m := decode(t, w)
-	if m["date"] != "2026-07-30" || len(m["exercises"].([]any)) != 2 {
-		t.Fatalf("put routine body: %v", m)
-	}
-	if _, hasName := m["exercises"].([]any)[0].(map[string]any)["name"]; !hasName {
-		t.Fatalf("routine exercise must use key 'name': %v", m["exercises"])
+	// PUT /api/routine is retired -> 400
+	w = c.req("PUT", "/api/routine", `{"exercises":[{"name":"懸垂","reps":10}]}`)
+	if w.Code != 400 || decode(t, w)["error"].(map[string]any)["message"] != "use PUT /api/presets/{name}" {
+		t.Fatalf("PUT /api/routine should 400: %d (%s)", w.Code, w.Body.String())
 	}
 
-	// get current
+	// build two presets via /api/presets
+	c.req("POST", "/api/presets", `{"name":"自重","sortOrder":0}`)
+	c.req("POST", "/api/presets", `{"name":"FW","sortOrder":1}`)
+	c.req("PUT", "/api/presets/"+urlSeg("自重"), `{"date":"2026-07-30","exercises":[
+		{"name":"懸垂","weight":null,"reps":10},{"name":"ディップス","weight":null,"reps":30}]}`)
+	c.req("PUT", "/api/presets/"+urlSeg("FW"), `{"date":"2026-07-28","exercises":[
+		{"name":"ヒップストラスト","weight":40,"reps":40,"sets":1}]}`)
+
+	// combined view: preset order 自重 -> FW, date = max latest date
 	w = c.req("GET", "/api/routine", "")
-	if w.Code != 200 || decode(t, w)["date"] != "2026-07-30" {
-		t.Fatalf("get routine: %d (%s)", w.Code, w.Body.String())
+	m := decode(t, w)
+	if m["date"] != "2026-07-30" {
+		t.Fatalf("combined date = %v, want max 2026-07-30", m["date"])
+	}
+	pr := m["presets"].([]any)
+	if len(pr) != 2 || pr[0] != "自重" || pr[1] != "FW" {
+		t.Fatalf("combined presets order: %v", pr)
+	}
+	exs := m["exercises"].([]any)
+	if len(exs) != 3 || exs[0].(map[string]any)["name"] != "懸垂" || exs[2].(map[string]any)["name"] != "ヒップストラスト" {
+		t.Fatalf("combined exercises order: %v", exs)
 	}
 
-	// history
-	w = c.req("GET", "/api/routine/history", "")
-	snaps := decode(t, w)["snapshots"].([]any)
-	if len(snaps) != 1 || snaps[0].(map[string]any)["exerciseCount"].(float64) != 2 {
-		t.Fatalf("history: %v", snaps)
+	// combined history: all presets, summed per date
+	snaps := decode(t, c.req("GET", "/api/routine/history", ""))["snapshots"].([]any)
+	if len(snaps) != 2 {
+		t.Fatalf("combined history: %v", snaps)
 	}
 
-	// patch existing exercise -> updated
-	w = c.req("PATCH", "/api/routine/exercises/"+urlSeg("ヒップストラスト"), `{"weight":42}`)
-	m = decode(t, w)
-	if w.Code != 200 || m["action"] != "updated" || m["routineDate"] != "2026-07-30" {
-		t.Fatalf("patch updated: %d (%v)", w.Code, m)
-	}
-
-	// patch unknown exercise -> added
-	w = c.req("PATCH", "/api/routine/exercises/"+urlSeg("新種目"), `{"reps":20}`)
-	if decode(t, w)["action"] != "added" {
-		t.Fatalf("patch added (%s)", w.Body.String())
-	}
-
-	// get snapshot by date
+	// combined by date
 	w = c.req("GET", "/api/routine/2026-07-30", "")
-	if w.Code != 200 || len(decode(t, w)["exercises"].([]any)) != 3 {
-		t.Fatalf("get by date: %d (%s)", w.Code, w.Body.String())
+	if w.Code != 200 || len(decode(t, w)["exercises"].([]any)) != 2 {
+		t.Fatalf("routine by date: %d (%s)", w.Code, w.Body.String())
+	}
+	if w = c.req("GET", "/api/routine/2000-01-01", ""); w.Code != 404 {
+		t.Fatalf("routine by missing date: %d", w.Code)
 	}
 
-	// missing snapshot -> 404
-	if w = c.req("GET", "/api/routine/2020-01-01", ""); w.Code != 404 {
-		t.Fatalf("missing snapshot code = %d", w.Code)
+	// cross-preset PATCH: 懸垂 only in 自重 -> in-place update there
+	w = c.req("PATCH", "/api/routine/exercises/"+urlSeg("懸垂"), `{"reps":12}`)
+	m = decode(t, w)
+	if w.Code != 200 || m["action"] != "updated" || m["preset"] != "自重" || m["presetDate"] != "2026-07-30" {
+		t.Fatalf("cross patch: %d (%v)", w.Code, m)
 	}
-}
-
-func TestRoutineExercisePatchNoRoutine(t *testing.T) {
-	c := newClient(t)
-	w := c.req("PATCH", "/api/routine/exercises/"+urlSeg("懸垂"), `{"weight":10}`)
-	if w.Code != 404 {
-		t.Fatalf("code = %d (%s)", w.Code, w.Body.String())
+	// unknown exercise -> 404 (this path never adds)
+	if w = c.req("PATCH", "/api/routine/exercises/"+urlSeg("どこにもない"), `{"reps":1}`); w.Code != 404 {
+		t.Fatalf("cross patch unknown: %d (%s)", w.Code, w.Body.String())
 	}
 }
 

@@ -84,6 +84,12 @@ func run() error {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
 
+	// Idempotent fixup: seed default presets and split legacy routine
+	// snapshots into named presets. Runs every startup, no-op once done.
+	if err := database.EnsureRoutinePresets(db); err != nil {
+		return fmt.Errorf("ensure routine presets: %w", err)
+	}
+
 	st := store.New(db)
 	svc := service.New(st)
 	handler := httpapi.NewRouter(svc, cfg.APIKey)

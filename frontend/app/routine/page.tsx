@@ -1,5 +1,5 @@
-import { RoutineManager } from '@/components/RoutineManager';
+import { PresetManager } from '@/components/PresetManager';
 
 export default function RoutinePage() {
-  return <RoutineManager />;
+  return <PresetManager />;
 }

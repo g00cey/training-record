@@ -25,6 +25,7 @@ var (
 	ErrNotFound         = errors.New("not found")
 	ErrExerciseNotFound = errors.New("exercise not found")
 	ErrDateExists       = errors.New("date already exists")
+	ErrPresetExists     = errors.New("preset already exists")
 )
 
 // rowQuerier is satisfied by *sql.DB and *sql.Tx.

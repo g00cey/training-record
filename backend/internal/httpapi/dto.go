@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"training-record/internal/domain"
+	"training-record/internal/service"
+	"training-record/internal/store"
 )
 
 // exerciseDTO is the API representation of a performed exercise.
@@ -68,7 +70,7 @@ func toSpinDTO(s *domain.SpinSession) spinSessionDTO {
 	}
 }
 
-// routineExerciseDTO is the API representation of a routine exercise
+// routineExerciseDTO is the API representation of a routine/preset exercise
 // (exercise_name -> name).
 type routineExerciseDTO struct {
 	Name   string   `json:"name"`
@@ -77,17 +79,57 @@ type routineExerciseDTO struct {
 	Sets   int      `json:"sets"`
 }
 
-type routineDTO struct {
+func toRoutineExerciseDTOs(exs []domain.RoutineExercise) []routineExerciseDTO {
+	out := make([]routineExerciseDTO, 0, len(exs))
+	for _, e := range exs {
+		out = append(out, routineExerciseDTO{Name: e.Name, Weight: e.Weight, Reps: e.Reps, Sets: e.Sets})
+	}
+	return out
+}
+
+// presetInfoDTO is one row of GET /api/presets.
+type presetInfoDTO struct {
+	Name          string  `json:"name"`
+	SortOrder     int     `json:"sortOrder"`
+	ExerciseCount int     `json:"exerciseCount"`
+	LatestDate    *string `json:"latestDate"`
+}
+
+func toPresetInfoDTO(p store.PresetInfo) presetInfoDTO {
+	return presetInfoDTO{
+		Name: p.Name, SortOrder: p.SortOrder, ExerciseCount: p.ExerciseCount, LatestDate: p.LatestDate,
+	}
+}
+
+// presetSnapshotDTO is GET/PUT /api/presets/{name} and .../{date}.
+type presetSnapshotDTO struct {
+	Name      string               `json:"name"`
 	Date      string               `json:"date"`
 	Exercises []routineExerciseDTO `json:"exercises"`
 }
 
-func toRoutineDTO(s *domain.RoutineSnapshot) routineDTO {
-	exs := make([]routineExerciseDTO, 0, len(s.Exercises))
-	for _, e := range s.Exercises {
-		exs = append(exs, routineExerciseDTO{Name: e.Name, Weight: e.Weight, Reps: e.Reps, Sets: e.Sets})
+func toPresetSnapshotDTO(s *service.PresetSnapshot) presetSnapshotDTO {
+	return presetSnapshotDTO{Name: s.Name, Date: s.Date, Exercises: toRoutineExerciseDTOs(s.Exercises)}
+}
+
+// combinedRoutineDTO is the legacy GET /api/routine merged view.
+type combinedRoutineDTO struct {
+	Date      *string              `json:"date"`
+	Presets   []string             `json:"presets"`
+	Exercises []routineExerciseDTO `json:"exercises"`
+}
+
+func toCombinedRoutineDTO(c *service.CombinedRoutine) combinedRoutineDTO {
+	var date *string
+	if c.Date != "" {
+		d := c.Date
+		date = &d
 	}
-	return routineDTO{Date: s.Date, Exercises: exs}
+	presets := c.Presets
+	if presets == nil {
+		presets = []string{}
+	}
+	return combinedRoutineDTO{Date: date, Presets: presets, Exercises: toRoutineExerciseDTOs(c.Exercises)}
 }
 
 // profileDTO is the API representation of the user profile.

@@ -8,7 +8,7 @@ const LINKS = [
   { href: '/', label: '一覧' },
   { href: '/calendar', label: 'カレンダー' },
   { href: '/volume', label: 'ボリューム' },
-  { href: '/routine', label: 'ルーティン' },
+  { href: '/routine', label: 'プリセット' },
   { href: '/settings', label: '設定' },
 ];
 

@@ -177,11 +177,28 @@ func TestMigrateIsIdempotent(t *testing.T) {
 			t.Fatalf("migrate pass %d: %v", i, err)
 		}
 	}
+	// One row per migration file, recorded once regardless of repeated runs.
 	var n int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Errorf("schema_migrations has %d rows, want 1", n)
+	want := len(migrationFiles(t))
+	if n != want {
+		t.Errorf("schema_migrations has %d rows, want %d", n, want)
 	}
+}
+
+func migrationFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir("../../migrations")
+	if err != nil {
+		t.Fatalf("read migrations dir: %v", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".sql" {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }

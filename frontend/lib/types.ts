@@ -51,12 +51,37 @@ export type RoutineExercise = {
   sets: number;
 };
 
+// 旧・互換読み取りビュー（GET /api/routine）。書き込みは presets に一本化済み。
 export type Routine = {
   date: string;
+  presets?: string[];
   exercises: RoutineExercise[];
 };
 
 export type RoutineHistory = {
+  snapshots: { date: string; exerciseCount: number }[];
+};
+
+// --- 名前付きプリセット（GET /api/presets ほか） ---
+
+export type PresetSummary = {
+  name: string;
+  sortOrder: number;
+  exerciseCount: number;
+  latestDate: string | null;
+};
+
+export type PresetList = {
+  presets: PresetSummary[];
+};
+
+export type Preset = {
+  name: string;
+  date: string;
+  exercises: RoutineExercise[];
+};
+
+export type PresetHistory = {
   snapshots: { date: string; exerciseCount: number }[];
 };
 

@@ -11,7 +11,8 @@ import { numOrNull, strengthFormSchema } from '@/lib/schemas';
 import { NOTES_PRESETS } from '@/lib/domain';
 import type {
   ExercisesList,
-  Routine,
+  Preset,
+  PresetList,
   StrengthSession,
 } from '@/lib/types';
 import { longLabel, todayJST } from '@/lib/date';
@@ -23,6 +24,7 @@ import {
   SectionTitle,
   Spinner,
   Toast,
+  cn,
 } from './ui';
 
 type ExerciseRow = {
@@ -32,6 +34,9 @@ type ExerciseRow = {
   reps: string;
   sets: string;
   notes: string;
+  // どのプリセット由来か。ユーザーが行を編集すると null になり、以後 OFF でも残る。
+  // サーバへは送らない純クライアント状態。
+  sourcePreset: string | null;
 };
 
 type FormValues = {
@@ -43,8 +48,28 @@ type FormValues = {
 
 const resolver = zodResolver(strengthFormSchema) as unknown as Resolver<FormValues>;
 
+const enc = encodeURIComponent;
+
 function emptyRow(): ExerciseRow {
-  return { name: '', bodyweight: false, weight: '', reps: '', sets: '1', notes: '' };
+  return {
+    name: '',
+    bodyweight: false,
+    weight: '',
+    reps: '',
+    sets: '1',
+    notes: '',
+    sourcePreset: null,
+  };
+}
+
+function isBlankRow(r: ExerciseRow): boolean {
+  return (
+    !r.sourcePreset &&
+    r.name.trim() === '' &&
+    String(r.weight).trim() === '' &&
+    String(r.reps).trim() === '' &&
+    (r.notes ?? '').trim() === ''
+  );
 }
 
 function toRows(session: StrengthSession): ExerciseRow[] {
@@ -55,6 +80,19 @@ function toRows(session: StrengthSession): ExerciseRow[] {
     reps: String(ex.reps),
     sets: String(ex.sets ?? 1),
     notes: ex.notes ?? '',
+    sourcePreset: null,
+  }));
+}
+
+function presetToRows(preset: Preset, name: string): ExerciseRow[] {
+  return preset.exercises.map((ex) => ({
+    name: ex.name,
+    bodyweight: ex.weight === null,
+    weight: ex.weight === null ? '' : String(ex.weight),
+    reps: String(ex.reps),
+    sets: String(ex.sets ?? 1),
+    notes: '',
+    sourcePreset: name,
   }));
 }
 
@@ -71,6 +109,7 @@ export function StrengthSessionForm({
   );
 
   const exercisesList = useSWR<ExercisesList>('/exercises', fetcher);
+  const presetList = useSWR<PresetList>('/presets', fetcher);
   const existing = useSWR<StrengthSession>(
     mode === 'edit' && routeDate ? `/strength-sessions/${routeDate}` : null,
     fetcher,
@@ -78,6 +117,9 @@ export function StrengthSessionForm({
 
   const [serverError, setServerError] = useState<string | null>(null);
   const [conflictDate, setConflictDate] = useState<string | null>(null);
+  // プリセット選択（選んだ順）。行の sourcePreset とは別に「チップの ON/OFF」を保持。
+  const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
+  const [presetBusy, setPresetBusy] = useState<string | null>(null);
 
   const defaultValues = useMemo<FormValues>(
     () => ({
@@ -95,6 +137,7 @@ export function StrengthSessionForm({
     control,
     handleSubmit,
     reset,
+    getValues,
     setValue,
     watch,
     formState: { errors, isSubmitting },
@@ -103,10 +146,19 @@ export function StrengthSessionForm({
 
   const submitMode = watch('submitMode');
 
+  const presets = useMemo(
+    () =>
+      [...(presetList.data?.presets ?? [])].sort(
+        (a, b) => a.sortOrder - b.sortOrder,
+      ),
+    [presetList.data],
+  );
+
   // 既存セッション読み込み後にフォームへ流し込む
   useEffect(() => {
     if (mode === 'edit' && existing.data) {
       setInitialDate(existing.data.date);
+      setSelectedPresets([]);
       reset({
         date: existing.data.date,
         notes: existing.data.notes ?? '',
@@ -121,8 +173,16 @@ export function StrengthSessionForm({
 
   const existingSession = existing.data;
 
+  // 行を編集したら、そのプリセット由来フラグを外す（OFF でも残るようにする）
+  function markEdited(i: number) {
+    if (getValues(`exercises.${i}.sourcePreset`)) {
+      setValue(`exercises.${i}.sourcePreset`, null);
+    }
+  }
+
   function switchMode(next: 'replace' | 'append') {
     setValue('submitMode', next);
+    setSelectedPresets([]);
     if (next === 'append') {
       fieldArray.replace([emptyRow()]);
     } else if (existingSession) {
@@ -134,30 +194,35 @@ export function StrengthSessionForm({
     }
   }
 
-  function applyRoutine(routine: Routine) {
-    fieldArray.replace(
-      routine.exercises.map((ex) => ({
-        name: ex.name,
-        bodyweight: ex.weight === null,
-        weight: ex.weight === null ? '' : String(ex.weight),
-        reps: String(ex.reps),
-        sets: String(ex.sets ?? 1),
-        notes: '',
-      })),
-    );
-  }
-
-  async function loadRoutineIntoForm() {
+  async function togglePreset(name: string) {
     setServerError(null);
+    const current = getValues('exercises') as ExerciseRow[];
+
+    if (selectedPresets.includes(name)) {
+      // OFF: このプリセット由来かつ未編集（sourcePreset が残っている）の行だけ除去
+      const kept = current.filter((r) => r.sourcePreset !== name);
+      fieldArray.replace(kept.length > 0 ? kept : [emptyRow()]);
+      setSelectedPresets((s) => s.filter((n) => n !== name));
+      return;
+    }
+
+    // ON: 最新スナップショットの種目を選択順に末尾追記
+    setPresetBusy(name);
     try {
-      const routine = await fetcher<Routine>('/routine');
-      applyRoutine(routine);
+      const preset = await fetcher<Preset>(`/presets/${enc(name)}`);
+      const base = current.filter((r) => !isBlankRow(r));
+      fieldArray.replace([...base, ...presetToRows(preset, name)]);
+      setSelectedPresets((s) => [...s, name]);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
-        setServerError('ルーティンが未登録です。先に「ルーティン」画面で作成してください。');
+        setServerError(
+          `プリセット「${name}」にはまだ種目がありません。「プリセット」画面で登録してください。`,
+        );
       } else {
         setServerError(e instanceof Error ? e.message : String(e));
       }
+    } finally {
+      setPresetBusy(null);
     }
   }
 
@@ -165,21 +230,27 @@ export function StrengthSessionForm({
     setServerError(null);
     setConflictDate(null);
 
-    const exercisesPayload = values.exercises.map((row) => ({
-      name: row.name.trim(),
-      weight: row.bodyweight ? null : numOrNull(row.weight),
-      reps: numOrNull(row.reps) ?? 0,
-      sets: numOrNull(row.sets) ?? 1,
-      notes: row.notes ?? '',
-    }));
+    const exercisesPayload = values.exercises
+      .filter((row) => row.name.trim() !== '')
+      .map((row) => ({
+        name: row.name.trim(),
+        weight: row.bodyweight ? null : numOrNull(row.weight),
+        reps: numOrNull(row.reps) ?? 0,
+        sets: numOrNull(row.sets) ?? 1,
+        notes: row.notes ?? '',
+      }));
 
     try {
       if (mode === 'new') {
-        const created = await apiMutate<StrengthSession>('/strength-sessions', 'POST', {
-          date: values.date,
-          notes: values.notes ?? '',
-          exercises: exercisesPayload,
-        });
+        const created = await apiMutate<StrengthSession>(
+          '/strength-sessions',
+          'POST',
+          {
+            date: values.date,
+            notes: values.notes ?? '',
+            exercises: exercisesPayload,
+          },
+        );
         router.push(`/sessions/${created?.date ?? values.date}`);
         return;
       }
@@ -209,7 +280,11 @@ export function StrengthSessionForm({
 
   async function onDelete() {
     if (!initialDate) return;
-    if (!window.confirm(`${longLabel(initialDate)} の筋トレ記録を削除します。よろしいですか？`)) {
+    if (
+      !window.confirm(
+        `${longLabel(initialDate)} の筋トレ記録を削除します。よろしいですか？`,
+      )
+    ) {
       return;
     }
     setServerError(null);
@@ -347,17 +422,55 @@ export function StrengthSessionForm({
           <h3 className="font-semibold text-gray-800">
             種目{submitMode === 'append' ? '（追記する分）' : ''}
           </h3>
-          <div className="flex gap-2">
-            <Button type="button" onClick={loadRoutineIntoForm}>
-              プリセットから記録
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={() => fieldArray.append(emptyRow())}
-            >
-              種目を追加
-            </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => fieldArray.append(emptyRow())}
+          >
+            種目を追加
+          </Button>
+        </div>
+
+        <div className="rounded-md bg-gray-50 p-3">
+          <p className="mb-2 text-xs font-medium text-gray-600">
+            プリセットから追加（複数選択可・選んだ順に末尾へ追記）
+          </p>
+          {presetList.error && (
+            <p className="text-xs text-red-600">
+              プリセット一覧を取得できませんでした。
+            </p>
+          )}
+          {!presetList.error && presets.length === 0 && (
+            <p className="text-xs text-gray-500">
+              プリセットがありません（「プリセット」画面で作成できます）。
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {presets.map((p) => {
+              const on = selectedPresets.includes(p.name);
+              return (
+                <button
+                  key={p.name}
+                  type="button"
+                  disabled={presetBusy !== null}
+                  onClick={() => togglePreset(p.name)}
+                  className={cn(
+                    'badge cursor-pointer border px-3 py-1 text-xs transition',
+                    on
+                      ? 'border-brand-500 bg-brand-600 text-white'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100',
+                    presetBusy !== null && 'opacity-50',
+                  )}
+                >
+                  {on ? '✓ ' : '＋ '}
+                  {p.name}
+                  <span className={cn('ml-1', on ? 'text-brand-100' : 'text-gray-400')}>
+                    {p.exerciseCount}
+                  </span>
+                  {presetBusy === p.name && ' …'}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -369,6 +482,7 @@ export function StrengthSessionForm({
           {fieldArray.fields.map((f, i) => {
             const rowErr = errors.exercises?.[i];
             const isBw = watch(`exercises.${i}.bodyweight`);
+            const src = watch(`exercises.${i}.sourcePreset`);
             return (
               <div
                 key={f.id}
@@ -377,14 +491,16 @@ export function StrengthSessionForm({
                 <div className="grid gap-3 sm:grid-cols-12">
                   <div className="sm:col-span-4">
                     <Field
-                      label={`種目 ${i + 1}`}
+                      label={`種目 ${i + 1}${src ? `（${src}）` : ''}`}
                       error={rowErr?.name?.message as string | undefined}
                     >
                       <input
                         className="input"
                         list={nameListId}
                         placeholder="種目名"
-                        {...register(`exercises.${i}.name`)}
+                        {...register(`exercises.${i}.name`, {
+                          onChange: () => markEdited(i),
+                        })}
                       />
                     </Field>
                   </div>
@@ -400,7 +516,9 @@ export function StrengthSessionForm({
                         inputMode="decimal"
                         disabled={!!isBw}
                         placeholder={isBw ? '自重' : ''}
-                        {...register(`exercises.${i}.weight`)}
+                        {...register(`exercises.${i}.weight`, {
+                          onChange: () => markEdited(i),
+                        })}
                       />
                     </Field>
                   </div>
@@ -413,7 +531,9 @@ export function StrengthSessionForm({
                         className="input"
                         type="number"
                         inputMode="numeric"
-                        {...register(`exercises.${i}.reps`)}
+                        {...register(`exercises.${i}.reps`, {
+                          onChange: () => markEdited(i),
+                        })}
                       />
                     </Field>
                   </div>
@@ -426,7 +546,9 @@ export function StrengthSessionForm({
                         className="input"
                         type="number"
                         inputMode="numeric"
-                        {...register(`exercises.${i}.sets`)}
+                        {...register(`exercises.${i}.sets`, {
+                          onChange: () => markEdited(i),
+                        })}
                       />
                     </Field>
                   </div>
@@ -444,6 +566,7 @@ export function StrengthSessionForm({
                           if (e.target.checked) {
                             setValue(`exercises.${i}.weight`, '');
                           }
+                          markEdited(i);
                         }}
                       />
                       自重
@@ -456,7 +579,9 @@ export function StrengthSessionForm({
                     <input
                       className="input"
                       placeholder="種目メモ（任意）"
-                      {...register(`exercises.${i}.notes`)}
+                      {...register(`exercises.${i}.notes`, {
+                        onChange: () => markEdited(i),
+                      })}
                     />
                   </div>
                   <div className="flex gap-1 sm:col-span-4">

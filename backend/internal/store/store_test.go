@@ -212,59 +212,127 @@ func TestSpinCRUDAndRPE(t *testing.T) {
 	}
 }
 
-func TestRoutineStore(t *testing.T) {
+func TestPresetStore(t *testing.T) {
 	st := testsupport.NewStore(t)
 
-	if d, err := st.LatestRoutineDate(); err != nil || d != "" {
-		t.Fatalf("empty routine date: %q / %v", d, err)
+	// empty
+	if list, err := st.ListPresets(); err != nil || len(list) != 0 {
+		t.Fatalf("empty preset list: %v / %v", list, err)
+	}
+	if d, err := st.LatestPresetDate("自重"); err != nil || d != "" {
+		t.Fatalf("empty latest preset date: %q / %v", d, err)
 	}
 
-	if err := st.ReplaceRoutine("2026-07-03", []domain.RoutineExercise{
-		{Name: "ヒップストラスト", Weight: fptr(38), Reps: 40, Sets: 1},
-		{Name: "懸垂", Reps: 10, Sets: 1},
-	}); err != nil {
-		t.Fatalf("replace routine: %v", err)
+	// create + duplicate
+	if _, err := st.CreatePreset("自重", iptr(0)); err != nil {
+		t.Fatalf("create 自重: %v", err)
 	}
-	if err := st.ReplaceRoutine("2026-07-30", []domain.RoutineExercise{
+	if _, err := st.CreatePreset("自重", nil); !errors.Is(err, store.ErrPresetExists) {
+		t.Fatalf("want ErrPresetExists, got %v", err)
+	}
+	if _, err := st.CreatePreset("FW", nil); err != nil { // appended -> sort_order 1
+		t.Fatalf("create FW: %v", err)
+	}
+
+	// snapshots: two dates for 自重 -> history of 2
+	if err := st.ReplacePresetSnapshot("自重", "2026-07-03", []domain.RoutineExercise{
+		{Name: "懸垂", Reps: 10, Sets: 1},
+		{Name: "ディップス", Reps: 30, Sets: 1},
+	}); err != nil {
+		t.Fatalf("replace 自重 snapshot 1: %v", err)
+	}
+	if err := st.ReplacePresetSnapshot("自重", "2026-07-30", []domain.RoutineExercise{
+		{Name: "懸垂", Reps: 12, Sets: 1},
+	}); err != nil {
+		t.Fatalf("replace 自重 snapshot 2: %v", err)
+	}
+	if err := st.ReplacePresetSnapshot("FW", "2026-07-30", []domain.RoutineExercise{
 		{Name: "ヒップストラスト", Weight: fptr(40), Reps: 40, Sets: 1},
 	}); err != nil {
-		t.Fatalf("replace routine 2: %v", err)
+		t.Fatalf("replace FW snapshot: %v", err)
 	}
 
-	d, err := st.LatestRoutineDate()
-	if err != nil || d != "2026-07-30" {
-		t.Fatalf("latest routine date: %q / %v", d, err)
+	if d, err := st.LatestPresetDate("自重"); err != nil || d != "2026-07-30" {
+		t.Fatalf("latest 自重 date: %q / %v", d, err)
 	}
-
-	hist, err := st.RoutineHistory()
+	hist, err := st.PresetHistory("自重")
 	if err != nil || len(hist) != 2 || hist[0].Date != "2026-07-30" || hist[0].ExerciseCount != 1 {
-		t.Fatalf("routine history: %+v / %v", hist, err)
+		t.Fatalf("自重 history: %+v / %v", hist, err)
 	}
 
-	// update existing exercise in the latest snapshot (in place)
-	action, rdate, err := st.UpdateRoutineExercise("ヒップストラスト", fptr(42), nil, nil)
-	if err != nil || action != "updated" || rdate != "2026-07-30" {
-		t.Fatalf("update-exercise updated: %q %q %v", action, rdate, err)
+	list, err := st.ListPresets()
+	if err != nil || len(list) != 2 {
+		t.Fatalf("preset list: %+v / %v", list, err)
 	}
-	rows, _ := st.RoutineByDate("2026-07-30")
-	if len(rows) != 1 || rows[0].Weight == nil || *rows[0].Weight != 42 {
-		t.Fatalf("update not applied: %+v", rows)
+	if list[0].Name != "自重" || list[0].SortOrder != 0 || list[0].ExerciseCount != 1 ||
+		list[0].LatestDate == nil || *list[0].LatestDate != "2026-07-30" {
+		t.Fatalf("preset info[0]: %+v", list[0])
+	}
+	if list[1].Name != "FW" || list[1].SortOrder != 1 {
+		t.Fatalf("preset info[1]: %+v", list[1])
 	}
 
-	// unknown exercise -> appended
-	action, _, err = st.UpdateRoutineExercise("新種目", nil, iptr(20), nil)
+	// PATCH in place: existing -> updated
+	action, pdate, err := st.UpdatePresetExercise("自重", "懸垂", nil, iptr(15), nil)
+	if err != nil || action != "updated" || pdate != "2026-07-30" {
+		t.Fatalf("patch updated: %q %q %v", action, pdate, err)
+	}
+	rows, _ := st.PresetSnapshot("自重", "2026-07-30")
+	if len(rows) != 1 || rows[0].Reps != 15 {
+		t.Fatalf("patch not applied: %+v", rows)
+	}
+	// PATCH missing -> added at end
+	action, _, err = st.UpdatePresetExercise("自重", "新種目", nil, iptr(20), nil)
 	if err != nil || action != "added" {
-		t.Fatalf("update-exercise added: %q %v", action, err)
+		t.Fatalf("patch added: %q %v", action, err)
 	}
-	rows, _ = st.RoutineByDate("2026-07-30")
-	if len(rows) != 2 || rows[1].Name != "新種目" || rows[1].Reps != 20 || rows[1].SortOrder != 1 {
-		t.Fatalf("append result: %+v", rows)
+	rows, _ = st.PresetSnapshot("自重", "2026-07-30")
+	if len(rows) != 2 || rows[1].Name != "新種目" || rows[1].SortOrder != 1 {
+		t.Fatalf("patch add result: %+v", rows)
+	}
+	// PATCH on unknown preset -> ErrNotFound
+	if _, _, err := st.UpdatePresetExercise("無い", "x", nil, iptr(1), nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 
-	// no routine at all -> ErrNotFound
-	empty := testsupport.NewStore(t)
-	if _, _, err := empty.UpdateRoutineExercise("x", nil, iptr(1), nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("want ErrNotFound, got %v", err)
+	// reorder: FW first, unknown names ignored, 自重 kept at end
+	infos, err := st.ReorderPresets([]string{"FW", "存在しない"})
+	if err != nil || len(infos) != 2 || infos[0].Name != "FW" || infos[0].SortOrder != 0 ||
+		infos[1].Name != "自重" || infos[1].SortOrder != 1 {
+		t.Fatalf("reorder: %+v / %v", infos, err)
+	}
+
+	// combined latest routine: FW (sortOrder 0) then 自重
+	date, presets, exs, count, err := st.CombinedLatestRoutine()
+	if err != nil || count != 2 || date != "2026-07-30" {
+		t.Fatalf("combined latest: date=%q count=%d err=%v", date, count, err)
+	}
+	if len(presets) != 2 || presets[0] != "FW" || presets[1] != "自重" {
+		t.Fatalf("combined presets order: %v", presets)
+	}
+	if len(exs) != 3 || exs[0].Name != "ヒップストラスト" {
+		t.Fatalf("combined exercises: %+v", exs)
+	}
+
+	// cross-preset in-place update: 懸垂 lives only in 自重
+	pn, pd, err := st.CrossPresetUpdateExercise("懸垂", nil, iptr(8), nil)
+	if err != nil || pn != "自重" || pd != "2026-07-30" {
+		t.Fatalf("cross update: %q %q %v", pn, pd, err)
+	}
+	if _, _, err := st.CrossPresetUpdateExercise("どこにもない", nil, iptr(1), nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross update missing: %v", err)
+	}
+
+	// delete preset removes its snapshots
+	found, err := st.DeletePreset("自重")
+	if err != nil || !found {
+		t.Fatalf("delete 自重: found=%v err=%v", found, err)
+	}
+	if h, _ := st.PresetHistory("自重"); len(h) != 0 {
+		t.Fatalf("snapshots not removed on delete: %+v", h)
+	}
+	if found, _ := st.DeletePreset("自重"); found {
+		t.Fatalf("re-delete reported found")
 	}
 }
 
@@ -283,7 +351,10 @@ func TestProfileAndExerciseNames(t *testing.T) {
 	if _, err := st.CreateStrength("2026-09-01", "", []domain.Exercise{{Name: "懸垂", Reps: 10, Sets: 1}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ReplaceRoutine("2026-09-01", []domain.RoutineExercise{{Name: "ディップス", Reps: 30, Sets: 1}}); err != nil {
+	if err := st.EnsurePreset("自重"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplacePresetSnapshot("自重", "2026-09-01", []domain.RoutineExercise{{Name: "ディップス", Reps: 30, Sets: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	names, err := st.ExerciseNames()

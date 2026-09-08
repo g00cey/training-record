@@ -161,7 +161,9 @@ GET /api/presets/自重/2026-07-03   → 200 (指定スナップショット) | 
 POST /api/presets            { "name": "コンディショニング", "sortOrder": 2 }  → 201 { "name": ..., "sortOrder": 2 }
                              既存名 → 409 conflict
 PUT  /api/presets:reorder    { "order": ["FW", "自重", "コンディショニング"] }   → 200 { "presets": [...] }
-DELETE /api/presets/コンディショニング  → 204  (そのプリセットの routine_snapshots も削除)
+                             order は既存プリセット全部をちょうど 1 回ずつ含むこと。
+                             未知の名前 / 重複 / 個数不一致 → 400 bad_request
+DELETE /api/presets/コンディショニング  → 204  (そのプリセットの routine_snapshots も削除) / 未知の名前は 404
 ```
 
 #### プリセット全体を更新（新スナップショットを積む＝履歴 +1。日付は今日）
@@ -172,6 +174,7 @@ PUT /api/presets/自重
 ```
 - プリセットが未登録なら**作成**（末尾の `sortOrder`）してからスナップショットを積む。
 - 任意で `{ "date": "2026-09-08", "exercises": [...] }` と明示可。
+- スナップショットは `(preset, date)` 単位。**同じ日に 2 回 PUT すると履歴は増えず内容が置換される**。履歴を増やしたいときは別日付を指定する。
 
 #### 単一種目の部分更新（現行 `update-exercise` 相当）
 ```
@@ -180,7 +183,8 @@ PATCH /api/presets/自重/exercises/懸垂
 → 200 { "action": "updated", "exercise": "懸垂", "preset": "自重", "presetDate": "2026-07-30" }
 ```
 - 存在しない種目名 → そのプリセットの最新スナップショット末尾に追加（`action: "added"`）
-- プリセット未登録 → `404`
+- プリセット未登録（`presets` に無い名前）→ `404`
+- 登録済みだがスナップショット未作成（`POST /api/presets` 直後など）→ 今日付でスナップショットを作成し追加（`action: "added"`）
 - **最新スナップショットを in-place 更新**（履歴は増やさない）
 
 ### ルーティン（旧・互換読み取り）
@@ -192,7 +196,8 @@ GET /api/routine
 → 200 { "date": "<全プリセット最新日の max>",
         "presets": ["自重", "FW"],
         "exercises": [ ...自重の全種目, ...FW の全種目 ] }   // exercises は preset 順→sort_order 順
-   | 404 (プリセットが 1 つも無い)
+   | 200 { "date": null, "presets": [], "exercises": [] }   // presets はあるがスナップショット未作成
+   | 404 (`presets` テーブルが空)
 
 GET /api/routine/history     → 200 { "snapshots": [ { "date": "2026-07-30", "exerciseCount": 22 }, ... ] }  // 全プリセット合算
 GET /api/routine/2026-07-03  → 200 (その日の全プリセット結合) | 404
