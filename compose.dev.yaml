@@ -17,13 +17,15 @@ services:
   backend:
     build:
       target: dev
-    command: go run ./cmd/server
-    environment:
-      # dev は bootstrap 元をコンテナ内にマウント済み（compose.yaml と同じ）
-      DB_PATH: /data/training.db
+    # dev イメージ（golang）には prod のバイナリが無いので、
+    # 一度ビルドしてから起動する。compose.yaml の healthcheck
+    # （/app/server -healthcheck）を dev でも成立させるため。
+    command: sh -c "mkdir -p /app && go build -o /app/server ./cmd/server && exec /app/server"
     volumes:
       - ./backend:/src
       - go-mod-cache:/go/pkg/mod
+    # bootstrap 元 (skill/ の training.db) は compose.yaml の
+    # ./skill/...:/bootstrap:ro をそのまま継承する。
 
   nginx:
     ports:

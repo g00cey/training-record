@@ -4,8 +4,8 @@
 
 | サービス | 技術 | 公開 | 役割 |
 |----------|------|------|------|
-| `nginx` | nginx (alpine) | ホストの :80 / :443 | 唯一の公開エンドポイント。TLS 終端、静的アセットのキャッシュ、`/` と `/api` の振り分け |
-| `frontend` | Next.js (App Router) + TypeScript | コンテナ内 :3000（nginx からのみ） | UI。SSR/CSR。ブラウザからは `/api/...`（= nginx 経由）だけを叩く |
+| `nginx` | nginx (alpine) | ホストの :80 / :443 | 唯一の公開エンドポイント。TLS 終端、`/api`（→ backend）と `/bff`・`/`（→ frontend）の振り分け |
+| `frontend` | Next.js (App Router) + TypeScript | コンテナ内 :3000（nginx からのみ） | UI。ブラウザからは同一オリジンの `/bff/...`（Next.js Route Handler）だけを叩く。Route Handler がサーバ側で API キーを付与し backend へ転送 |
 | `backend` | Go + `net/http` (Go 1.22 `ServeMux`) | コンテナ内 :8080（nginx からのみ） | REST API。ドメインロジックと永続化。frontend と Hermes Agent の共通バックエンド |
 
 DB は backend コンテナ内の SQLite ファイル（named volume に永続化）。→ [data-model.md](./data-model.md)
@@ -14,16 +14,20 @@ DB は backend コンテナ内の SQLite ファイル（named volume に永続�
 
 ```
 ブラウザ ──► nginx :80/:443
-                │  location /        ──► frontend:3000   (Next.js)
-                │  location /api/    ──► backend:8080     (Go REST API)
-                          │
-                          └──► SQLite (/data/training.db, volume: training-data)
+                │  location /        ──► frontend:3000   (Next.js 本体・静的アセット)
+                │  location /bff/    ──► frontend:3000   (Next.js Route Handler /bff/[...path])
+                │                            └─ サーバ側で Authorization: Bearer を付与
+                │                               INTERNAL_API_BASE (http://backend:8080/api) へ転送
+                │  location /api/    ──► backend:8080     (Go REST API・Hermes 用)
+                                             │
+                                             └──► SQLite (/data/training.db, volume: training-data)
 
-Hermes Agent ──► nginx :443  /api/...  ──► backend:8080
+Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自身が API キーを保持)
 ```
 
-- frontend は backend を**直接参照しない**。サーバコンポーネントからのフェッチも nginx 経由か、compose ネットワーク内の `http://backend:8080` を使う（`INTERNAL_API_BASE` で切替）。
-- ブラウザ公開用のベースパスは常に `/api`（`NEXT_PUBLIC_API_BASE=/api`）。
+- frontend は backend を**直接参照しない**。ブラウザは同一オリジンの `/bff/*` のみを叩き、Next.js の Route Handler が `INTERNAL_API_BASE` + API キーで backend に中継する。
+- ブラウザ公開用のベースパスは `/bff`（`NEXT_PUBLIC_API_BASE=/bff`）。`/api` は backend 直で、キーを持つ Hermes Agent 専用。
+- この分離により API キーが意味を持つ（`/api` に到達するには キーが必須。ブラウザは `/api` を使わない）。
 
 ## 技術選定
 
@@ -53,9 +57,10 @@ Hermes Agent ──► nginx :443  /api/...  ──► backend:8080
 
 - `/api/*` は `Authorization: Bearer <API_KEY>` を必須（`/api/health` を除く）。LAN 越しの Hermes 呼び出しに対する軽い防御（defense-in-depth）として残す
 - ブラウザは backend を直接叩かない。フロー:
-  - ブラウザ → nginx `/` → Next.js（サーバ） → `INTERNAL_API_BASE` + API キーを付与して backend
-  - Hermes Agent（別マシン） → nginx `/api/` → backend（Hermes 自身が API キーを保持）
+  - ブラウザ → nginx `/bff/*` → frontend の Next.js Route Handler（`app/bff/[...path]`） → `INTERNAL_API_BASE` + API キーを付与して backend
+  - Hermes Agent（別マシン） → nginx `/api/*` → backend（Hermes 自身が API キーを保持）
 - API キーはブラウザに出さない（Next.js サーバ側の env `API_KEY` のみ）。nginx でのキー付与はしない（付与すると LAN 内の誰でも `/api` を素通しできてしまうため）
+- ブラウザ経路（`/bff`）と Hermes 経路（`/api`）を別パスにするのが要点。nginx `/api/` を frontend に向けると キーが付かず 401 になる（初回実装で踏んだ落とし穴）
 - CORS 設定は不要（frontend は同一オリジン、Hermes はサーバ間呼び出し）
 - TLS: 必須ではない。nginx は :80 の HTTP で提供。必要なら自己署名証明書で :443 も（→ [infrastructure.md](./infrastructure.md)）
 

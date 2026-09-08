@@ -5,7 +5,10 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 
 ## 共通事項
 
-- ベース URL: `/api`（nginx 経由）。コンテナ内は `http://backend:8080/api`
+- ベース URL:
+  - Hermes Agent: `/api`（nginx → backend 直）。コンテナ内は `http://backend:8080/api`
+  - ブラウザ（frontend）: `/bff`（nginx → Next.js Route Handler → backend）。frontend のクライアントコードは `/bff/*` だけを叩き、キー付与はサーバ側で行う
+  - エンドポイントのパス（`/strength-sessions` 等）は両者共通。以下の記載は `/api` で統一表記
 - 認証: `Authorization: Bearer <API_KEY>`（`/api/health` を除く全エンドポイント必須）。欠落/不一致は `401`
   - frontend はブラウザから直接叩かず、Next.js サーバ側がキーを付与して backend を呼ぶ。Hermes Agent は自分でキーを保持（LAN 越し）
   - CORS 応答は返さない（同一オリジン / サーバ間のみ想定）

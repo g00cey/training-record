@@ -35,130 +35,41 @@ training-record/
     └── ...(Go)
 ```
 
-## compose.yaml（設計ドラフト）
+## compose / nginx の実ファイル
 
-```yaml
-name: training-record
+実体はリポジトリ直下:
 
-services:
-  nginx:
-    build: ./nginx
-    ports:
-      - "80:80"
-      # - "443:443"   # 自己署名 TLS を使う場合のみ有効化（任意）
-    depends_on:
-      frontend:
-        condition: service_started
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
+- `compose.yaml` — 本番相当。nginx(80) / frontend / backend の 3 サービス、`training-data` volume、`./skill/.../training-logs` を `/bootstrap:ro` マウント
+- `compose.dev.yaml` — dev オーバーライド（バインドマウント、nginx はホスト :8080）
+- `nginx/conf.d/app.conf` — `/api/` → backend（Hermes 用）、それ以外（`/bff`・`/_next`・`/`）→ frontend
 
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        NEXT_PUBLIC_API_BASE: /api
-    environment:
-      NODE_ENV: production
-      INTERNAL_API_BASE: http://backend:8080/api   # SSR フェッチ用
-      TZ: Asia/Tokyo
-    expose:
-      - "3000"
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
+以下は設計上の要点（実装で踏んだ落とし穴とその対処を含む）。
 
-  backend:
-    build: ./backend
-    environment:
-      PORT: "8080"
-      DB_PATH: /data/training.db
-      BOOTSTRAP_DB_PATH: /bootstrap/training.db   # 初回のみ。無ければスキップ
-      API_KEY: ${API_KEY:?set API_KEY in .env}
-      TZ: Asia/Tokyo
-    volumes:
-      - training-data:/data
-      - ./skill/.hermes/home/.hermes/training-logs:/bootstrap:ro   # 既存DBの初期取り込み
-    expose:
-      - "8080"
-    healthcheck:
-      test: ["CMD", "/app/healthcheck"]           # or wget -qO- http://localhost:8080/api/health
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 20s
-    restart: unless-stopped
+### パスの割り当て
 
-volumes:
-  training-data:
-```
+| nginx location | 転送先 | 用途 |
+|----------------|--------|------|
+| `/api/` | `backend:8080` | Hermes Agent。呼び出し側が `Authorization: Bearer` を保持 |
+| `/bff/` | `frontend:3000` | ブラウザ。Next.js Route Handler `app/bff/[...path]` がサーバ側でキーを付与し backend へ中継 |
+| `/`（上記以外すべて） | `frontend:3000` | Next.js 本体・静的アセット（`/_next/...` 含む） |
 
-### compose.dev.yaml（設計ドラフト）
+- `NEXT_PUBLIC_API_BASE=/bff`（ビルド引数）、`INTERNAL_API_BASE=http://backend:8080/api`（frontend ランタイム env）、`API_KEY`（frontend ランタイム env・ブラウザには出さない）。
+- ⚠️ **nginx `/api/` を frontend に向けてはいけない**。ブラウザ経路は必ず `/bff`。`/api` を frontend に回すとキー未付与で 401 になる（初回実装で発生）。
+- 静的アセットの `Cache-Control` は Next.js が付ける。nginx で `add_header` を重ねない（二重ヘッダになる）。
 
-```yaml
-services:
-  frontend:
-    build:
-      target: dev
-    command: npm run dev
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      NODE_ENV: development
-  backend:
-    build:
-      target: dev
-    command: go run ./cmd/server
-    volumes:
-      - ./backend:/src
-  nginx:
-    ports:
-      - "8080:80"     # dev はホスト 8080
-```
+### backend の named volume 権限（重要）
 
-起動: `docker compose -f compose.yaml -f compose.dev.yaml up --build`
+- prod イメージは distroless nonroot（UID 65532）で動作する。named volume `training-data` は初回作成時 root 所有になり、そのままでは backend が `/data/training.db` を作成できず `SQLITE_CANTOPEN` で起動失敗する。
+- 対処: **backend の Dockerfile prod ステージで `/data` を UID 65532 所有で用意する**（`COPY --chown=65532:65532` で空ディレクトリを配置。空の named volume はマウント先の所有権・パーミッションをイメージから継承する）。あるいは compose に chown する init コンテナを足す。
+- `make clean`（`down -v`）でボリュームを消した後の初回起動でも素で立ち上がること。
 
-## nginx（`nginx/conf.d/app.conf` ドラフト）
+### dev の healthcheck
 
-```nginx
-upstream frontend { server frontend:3000; }
-upstream backend  { server backend:8080; }
+- `compose.yaml` の healthcheck は `["CMD", "/app/server", "-healthcheck"]`。dev イメージ（golang）には `/app/server` が無いため、`compose.dev.yaml` で backend を「一度 `go build -o /app/server` してから起動」に上書きし、同じ healthcheck を成立させる。
 
-server {
-    listen 80;
-    server_name _;
+### TLS（任意）
 
-    # LAN 内 HTTP 提供。TLS を使う場合は listen 443 ssl のサーバブロックを別途追加（任意）。
-    client_max_body_size 1m;
-
-    location /api/ {
-        proxy_pass http://backend/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 30s;
-    }
-
-    location / {
-        proxy_pass http://frontend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Next.js 静的アセット
-    location /_next/static/ {
-        proxy_pass http://frontend;
-        proxy_cache_valid 200 60m;
-        add_header Cache-Control "public, max-age=3600, immutable";
-    }
-}
-```
-
-TLS（任意）: LAN 内なので必須ではない。使う場合は自己署名証明書を `./nginx/certs:/etc/nginx/certs:ro` でマウントし、443 の server ブロックを追加。Let's Encrypt は公開ドメインが必要なので対象外。
+LAN 内なので必須ではない。使う場合は自己署名証明書を `./nginx/certs:/etc/nginx/certs:ro` でマウントし、443 の server ブロックを追加。Let's Encrypt は公開ドメインが必要なので対象外。
 
 ## Dockerfile 方針
 
@@ -199,7 +110,7 @@ FROM node:22-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ARG NEXT_PUBLIC_API_BASE=/api
+ARG NEXT_PUBLIC_API_BASE=/bff
 RUN npm run build          # next.config: output: 'standalone'
 
 FROM node:22-alpine AS prod
@@ -222,11 +133,11 @@ COPY conf.d/ /etc/nginx/conf.d/
 
 | 変数 | サービス | 説明 |
 |------|----------|------|
-| `API_KEY` | backend / frontend | API 認証キー（必須・生成する） |
+| `API_KEY` | backend / frontend(runtime) | API 認証キー（必須・生成する）。frontend では Route Handler が backend 転送時に付与 |
 | `DB_PATH` | backend | 既定 `/data/training.db` |
 | `BOOTSTRAP_DB_PATH` | backend | 初回移行元。未設定/不在ならスキップ |
-| `INTERNAL_API_BASE` | frontend | SSR 用 `http://backend:8080/api` |
-| `NEXT_PUBLIC_API_BASE` | frontend(build) | ブラウザ用 `/api` |
+| `INTERNAL_API_BASE` | frontend(runtime) | Route Handler → backend `http://backend:8080/api` |
+| `NEXT_PUBLIC_API_BASE` | frontend(build) | ブラウザ用 `/bff` |
 | `TZ` | 全部 | `Asia/Tokyo` |
 
 ## 運用メモ

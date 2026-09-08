@@ -18,7 +18,9 @@ services:
       context: ./frontend
       target: prod
       args:
-        NEXT_PUBLIC_API_BASE: /api
+        # ブラウザ用のベースパス。Next.js Route Handler (/bff/[...path]) が
+        # サーバ側で API キーを付与して backend へ転送する。
+        NEXT_PUBLIC_API_BASE: /bff
     environment:
       NODE_ENV: production
       # SSR / Route Handler からの内部呼び出し先（compose ネットワーク内）
