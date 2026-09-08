@@ -1,0 +1,33 @@
+# 開発用オーバーライド。
+#   docker compose -f compose.yaml -f compose.dev.yaml up --build
+# バインドマウント + ホットリロードで動かす。
+
+services:
+  frontend:
+    build:
+      target: dev
+    command: npm run dev
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+  backend:
+    build:
+      target: dev
+    command: go run ./cmd/server
+    environment:
+      # dev は bootstrap 元をコンテナ内にマウント済み（compose.yaml と同じ）
+      DB_PATH: /data/training.db
+    volumes:
+      - ./backend:/src
+      - go-mod-cache:/go/pkg/mod
+
+  nginx:
+    ports:
+      - "8080:80"   # dev はホスト 8080 で公開
+
+volumes:
+  go-mod-cache:
