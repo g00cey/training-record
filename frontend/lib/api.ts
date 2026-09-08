@@ -1,5 +1,5 @@
 // サーバ専用: backend への fetch ラッパ。
-// Route Handler（app/api/[...path]）や サーバコンポーネントから使う。
+// Route Handler（app/bff/[...path]）や サーバコンポーネントから使う。
 // ブラウザからは絶対に呼ばない（API キーがサーバ env にしかない）。
 import 'server-only';
 

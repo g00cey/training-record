@@ -21,7 +21,7 @@ CMD ["npm", "run", "dev"]
 FROM node:24-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
-ARG NEXT_PUBLIC_API_BASE=/api
+ARG NEXT_PUBLIC_API_BASE=/bff
 ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .

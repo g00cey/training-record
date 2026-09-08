@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { proxyToBackend } from '@/lib/api';
 
-// ブラウザ → 同一オリジン /api/** → ここ → backend(INTERNAL_API_BASE) に Bearer 付きで転送。
+// ブラウザ → 同一オリジン /bff/** → ここ → backend(INTERNAL_API_BASE) に Bearer 付きで転送。
 // API キーはサーバ env のみ。ブラウザには出さない。
+// nginx では /api/* は backend 直送（Hermes 用）なので、ブラウザ経路は別パス /bff にする。
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
