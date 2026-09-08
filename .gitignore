@@ -1,0 +1,35 @@
+# --- secrets / local config ---
+.env
+.env.local
+.env.*.local
+*.local
+
+# --- migration source / reference assets (kept on disk, not version-controlled) ---
+/skill/
+
+# --- dependencies ---
+node_modules/
+
+# --- build output ---
+.next/
+out/
+dist/
+/backend/bin/
+/backend/server
+*.exe
+
+# --- SQLite / data ---
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+/data/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

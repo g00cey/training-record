@@ -1,0 +1,285 @@
+# REST API 仕様
+
+backend が公開する API。**frontend と Hermes Agent の共通インターフェース**。
+現行 CLI（`training_db.py`）のサブコマンドを REST に再編したもの。
+
+## 共通事項
+
+- ベース URL: `/api`（nginx 経由）。コンテナ内は `http://backend:8080/api`
+- 認証: `Authorization: Bearer <API_KEY>`（`/api/health` を除く全エンドポイント必須）。欠落/不一致は `401`
+  - frontend はブラウザから直接叩かず、Next.js サーバ側がキーを付与して backend を呼ぶ。Hermes Agent は自分でキーを保持（LAN 越し）
+  - CORS 応答は返さない（同一オリジン / サーバ間のみ想定）
+- Content-Type: `application/json; charset=utf-8`
+- 日付: `YYYY-MM-DD`（文字列）。タイムゾーンは `Asia/Tokyo`
+- 種目名キーは全エンドポイントで **`name`** に統一（DB の `exercise_name` は API 境界で変換）
+- 自重種目の `weight` は `null`（`0` ではない）
+
+### レスポンス形
+
+成功はリソースを直接返す（`200` / `201` / `204`）。エラーは:
+
+```json
+{ "error": { "code": "not_found", "message": "strength session 2026-09-10 not found" } }
+```
+
+`code` 例: `bad_request` / `unauthorized` / `not_found` / `conflict` / `unprocessable` / `internal`
+
+### CLI → API 対応表
+
+| `training_db.py` | API |
+|---|---|
+| `record-strength` | `POST /api/strength-sessions` / `PUT /api/strength-sessions/{date}` |
+| `record-strength --append` | `POST /api/strength-sessions/{date}/exercises` |
+| `record-spin` | `POST /api/spin-sessions` / `PUT /api/spin-sessions/{date}` |
+| `get-history` | `GET /api/strength-sessions` / `GET /api/history` |
+| `last-session` | `GET /api/sessions/last` |
+| `summary` | `GET /api/summary` |
+| `weekly-summary` | `GET /api/summary/weekly` |
+| `get-routine` / `show-routine` | `GET /api/routine` |
+| `update-routine` | `PUT /api/routine` |
+| `update-exercise` | `PATCH /api/routine/exercises/{name}` |
+| `get-exercise-list` | `GET /api/exercises` |
+| （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
+
+---
+
+## エンドポイント
+
+### ヘルスチェック
+```
+GET /api/health → 200 { "status": "ok", "time": "2026-09-08T12:00:00+09:00" }
+```
+
+### 筋トレセッション
+
+#### 一覧
+```
+GET /api/strength-sessions?from=2026-08-01&to=2026-08-31&limit=30&offset=0
+→ 200 { "items": [ StrengthSession... ], "total": 36 }
+```
+`from`/`to` 省略時は全期間、`limit` 既定 30、日付降順。
+
+#### 取得
+```
+GET /api/strength-sessions/2026-09-07 → 200 StrengthSession | 404
+```
+
+#### 作成（新規のみ。既存日付は 409）
+```
+POST /api/strength-sessions
+{
+  "date": "2026-09-08",
+  "notes": "自重＋フリーウェイト",
+  "exercises": [
+    { "name": "ヒップストラスト", "weight": 40, "reps": 40, "sets": 1, "notes": "" },
+    { "name": "懸垂", "weight": null, "reps": 10 }
+  ]
+}
+→ 201 StrengthSession | 409 (conflict, 既存日付)
+```
+`sort_order` は配列順で自動採番。
+
+#### 置き換え（upsert・全種目を差し替え = 現行 `record-strength` 既定挙動）
+```
+PUT /api/strength-sessions/2026-09-08
+{ "notes": "...", "exercises": [ ... ] }
+→ 200 StrengthSession (新規なら 201)
+```
+
+#### メモのみ更新
+```
+PATCH /api/strength-sessions/2026-09-08
+{ "notes": "自重＋フリーウェイト; 肩に違和感" }
+→ 200 StrengthSession
+```
+
+#### 種目の追記（現行 `--append`。notes は "; " 連結）
+```
+POST /api/strength-sessions/2026-09-08/exercises
+{ "exercises": [ { "name": "腕立て伏せ", "reps": 30 } ], "notes": "自重のみ" }
+→ 200 StrengthSession
+```
+
+#### 種目の個別編集 / 削除 / 並べ替え
+```
+PUT    /api/strength-sessions/2026-09-08/exercises/{exerciseId}
+       { "name": "...", "weight": 42, "reps": 40, "sets": 1, "notes": "" } → 200
+DELETE /api/strength-sessions/2026-09-08/exercises/{exerciseId} → 204
+PUT    /api/strength-sessions/2026-09-08/exercises:reorder
+       { "orderedIds": [12, 10, 11, ...] } → 200 StrengthSession
+```
+
+#### セッション削除
+```
+DELETE /api/strength-sessions/2026-09-08 → 204   (exercises は CASCADE)
+```
+
+### スピンバイクセッション
+
+```
+GET    /api/spin-sessions?from=&to=&limit=  → 200 { "items": [...], "total": n }
+GET    /api/spin-sessions/2026-07-22        → 200 SpinSession | 404
+POST   /api/spin-sessions                   → 201 | 409
+PUT    /api/spin-sessions/2026-07-22        → 200/201
+PATCH  /api/spin-sessions/2026-07-22        → 200   (部分更新)
+DELETE /api/spin-sessions/2026-07-22        → 204
+```
+`POST`/`PUT` body:
+```json
+{ "date": "2026-07-22", "duration_minutes": 52, "avg_heart_rate": 130,
+  "max_heart_rate": 156, "rpe": null, "distance_km": null,
+  "notes": "心拍ゾーン内訳: ウォームアップ8:16/インテンシブ10:42/..." }
+```
+`rpe` が `null` かつ `avg_heart_rate` と `max_heart_rate` があれば `round(avg/max*10)` を 1–10 にクランプして保存（現行踏襲）。
+
+### ルーティン（プリセット）
+
+```
+GET /api/routine
+→ 200 { "date": "2026-07-30", "exercises": [ { "name": "...", "weight": 38, "reps": 40, "sets": 1 }, ... ] }
+   | 404 { "error": { "code": "not_found", "message": "no routine" } }
+
+GET /api/routine/history       → 200 { "snapshots": [ { "date": "2026-07-30", "exerciseCount": 22 }, ... ] }
+GET /api/routine/2026-07-03    → 200 (指定スナップショット) | 404
+```
+
+#### ルーティン全体を更新（新スナップショットを積む。日付は今日）
+```
+PUT /api/routine
+{ "exercises": [ { "name": "ヒップストラスト", "weight": 40, "reps": 40, "sets": 1 }, ... ] }
+→ 200 { "date": "<today>", "exercises": [...] }
+```
+任意で `{ "date": "2026-09-08", "exercises": [...] }` と明示可（現行 `update-routine --date`）。
+
+#### 単一種目の部分更新（現行 `update-exercise`）
+```
+PATCH /api/routine/exercises/ヒップストラスト
+{ "weight": 42 }            // weight / reps / sets のうち送ったものだけ変更
+→ 200 { "action": "updated", "exercise": "ヒップストラスト", "routineDate": "2026-07-30" }
+```
+- 存在しない種目名 → ルーティン末尾に追加（`action: "added"`）
+- ルーティン未登録 → `404`
+- URL の種目名は要 URL エンコード
+
+### 種目マスタ
+```
+GET /api/exercises
+→ 200 { "exercises": ["ディップス", "バックエクステンション", "ヒップストラスト", ...] }
+```
+`exercises` + `routine_snapshots` から `DISTINCT` した名前のソート済みリスト（現行 `get-exercise-list`）。
+
+### プロフィール
+```
+GET /api/profile → 200 { "bodyweightKg": 86.0, "heightCm": 170.0, "maxHrEst": 180 }
+PUT /api/profile { "bodyweightKg": 85.0 } → 200 (部分更新可)
+```
+
+---
+
+## 集計・ビュー系
+
+### カレンダー表示用
+```
+GET /api/calendar?month=2026-09
+→ 200 {
+  "month": "2026-09",
+  "days": [
+    { "date": "2026-09-05", "strength": { "kind": "fw_only", "exerciseCount": 13, "volumeLoad": 41000 },
+      "spin": null },
+    { "date": "2026-09-06", "strength": { "kind": "bodyweight_only", "exerciseCount": 9, "volumeLoad": 22000 },
+      "spin": null },
+    { "date": "2026-09-07", "strength": { "kind": "bodyweight_and_fw", "exerciseCount": 22, "volumeLoad": 63000 },
+      "spin": { "durationMinutes": 30, "rpe": 7 } }
+  ]
+}
+```
+`kind` は `notes` から判定: `bodyweight_only` / `fw_only` / `bodyweight_and_fw` / `other`。実施のない日は `days` に含めない。
+
+### ボリューム推移グラフ用
+```
+GET /api/volume?granularity=session&from=2026-07-01&to=2026-09-30
+→ 200 { "granularity": "session",
+        "points": [ { "date": "2026-07-03", "volumeLoad": 38500, "exerciseCount": 19 }, ... ] }
+
+GET /api/volume?granularity=week
+→ 200 { "granularity": "week",
+        "points": [ { "weekStart": "2026-07-28", "volumeLoad": 210000, "sessionCount": 4 }, ... ] }
+
+GET /api/volume?exercise=ヒップストラスト
+→ 200 { "exercise": "ヒップストラスト",
+        "points": [ { "date": "2026-07-03", "weight": 38, "reps": 40, "sets": 1, "volumeLoad": 1520 }, ... ] }
+```
+Volume Load = `Σ weight × reps × sets`。自重種目は `profile.bodyweightKg` を weight とみなす（`BODYWEIGHT_EXERCISES` 相当の判定 → [domain.md](./domain.md)）。
+
+### サマリー（現行 `summary`）
+```
+GET /api/summary?days=30
+→ 200 { "periodDays": 30, "since": "2026-08-09",
+        "strengthSessionsInPeriod": 20, "spinSessionsInPeriod": 0,
+        "totalStrengthSessions": 36, "totalSpinSessions": 5,
+        "latestStrengthDate": "2026-09-07", "latestSpinDate": "2026-07-22",
+        "latestRoutineDate": "2026-07-30" }
+```
+
+### 週次サマリー + 評価（現行 `weekly-summary`）
+```
+GET /api/summary/weekly
+→ 200 { "period": "2026-09-01 ~ 2026-09-08",
+        "summary": { "totalTrainingSessions": 6, "spinSessions": {...}, "strengthSessions": {...} },
+        "evaluation": ["✅ トレーニング頻度：良好（5-6回/週）", ...],
+        "advice": ["故障予防のため、2日に1回の頻度を維持", ...] }
+```
+
+### 負荷レポート ACWR / TRIMP（現行 `training_load_analysis.py`）
+```
+GET /api/load-report
+→ 200 { "asOf": "2026-09-08",
+        "profile": { "bodyweightKg": 86, "heightCm": 170, "bmi": 29.8 },
+        "acute7d": { "strengthSessions": 4, "spinSessions": 0, "volumeLoad": 180000, "spinTrimp": 0, "total": 180000, "volumeLoadPerBw": 2093 },
+        "chronic28d": { "strengthSessions": 16, "weeklyVolumeLoad": 175000 },
+        "acwr": 1.03,
+        "zone": "safe",              // safe | caution | warning | low | slightly_low | no_data
+        "latestSessionBreakdown": [ { "name": "ヒップストラスト", "volumeLoad": 1600, "isBodyweight": false }, ... ],
+        "recommendations": ["現状のペースを維持してください", "4-6週間に1回、デロード週を..."] }
+```
+
+### 直近セッション（現行 `last-session`）
+```
+GET /api/sessions/last
+→ 200 { "strength": StrengthSession | null, "spin": SpinSession | null }
+```
+
+---
+
+## スキーマ（レスポンスオブジェクト）
+
+### StrengthSession
+```json
+{
+  "date": "2026-09-07",
+  "notes": "自重＋フリーウェイト",
+  "createdAt": "2026-09-07T15:04:07+09:00",
+  "updatedAt": "2026-09-07T15:04:07+09:00",
+  "exercises": [
+    { "id": 540, "name": "ヒップストラスト", "weight": 40, "reps": 40, "sets": 1, "notes": "", "sortOrder": 0 }
+  ]
+}
+```
+
+### SpinSession
+```json
+{
+  "date": "2026-07-22", "durationMinutes": 52, "avgHeartRate": 130, "maxHeartRate": 156,
+  "rpe": 8, "distanceKm": null, "notes": "心拍ゾーン内訳: ...",
+  "createdAt": "2026-07-22T14:36:08+09:00", "updatedAt": "2026-07-22T14:36:08+09:00"
+}
+```
+
+JSON キーは **camelCase**。DB は snake_case（境界で変換）。
+
+## Hermes Agent 側の移行
+
+現行スキルは `python3 training_db.py <cmd>` を実行 → 新スキルは `curl`/HTTP でこの API を叩く。
+`SKILL.md` の各ワークフローのコマンド例を、上表の対応でエンドポイント呼び出しに置換する。
+API キーは Hermes 環境の環境変数（例: `TRAINING_API_KEY`, `TRAINING_API_BASE`）で持たせる。
+</content>
