@@ -25,6 +25,18 @@ async function handle(
     body && body.byteLength > 0 ? body : undefined,
   );
 
+  // 204 / 205 / 304 はボディ禁止（undici の Response コンストラクタが例外を投げる）。
+  // ボディ空の場合も null を渡す。
+  const noBody =
+    result.status === 204 ||
+    result.status === 205 ||
+    result.status === 304 ||
+    result.body.byteLength === 0;
+
+  if (noBody) {
+    return new NextResponse(null, { status: result.status });
+  }
+
   const headers = new Headers();
   headers.set(
     'content-type',
