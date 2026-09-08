@@ -53,7 +53,7 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 | `sort_order` | INTEGER DEFAULT 0 | |
 | `created_at` | TEXT | |
 
-- 最新 `date` の行群 = 「現在のルーティン」。変更のたびに新 `date` で全行を積み直す（部分更新でも新スナップショットを作る）。
+- 最新 `date` の行群 = 「現在のルーティン」。`PUT /api/routine`（全体更新）は新しい `date` で全行を積み直す。`PATCH /api/routine/exercises/{name}`（単一種目）は最新スナップショットを in-place 更新する（現行 `cmd_update_exercise` 準拠）。
 
 ### profile — ユーザプロフィール（**新規・単一行**）
 | カラム | 型 | 既定 | 用途 |

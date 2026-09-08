@@ -80,7 +80,9 @@ Web 版で実装する場合の判定ルール:
 4. **日本語種目名の表記ゆれ**。`GET /api/exercises` の既存名に寄せる。オートコンプリート必須。将来は種目マスタ化。
 5. **キー名**: DB は `routine_snapshots.exercise_name`、API は `name` に統一（境界で変換）。
 6. **同名種目の複数エントリ**（「懸垂 10r」「懸垂 6r」）は独立行として保持・表示。1 行にまとめない。
-7. **`routine_snapshots` は履歴**。最新 `date` のみが「現在」。部分更新でも新スナップショットを作る設計。
+7. **`routine_snapshots` は履歴**。最新 `date` のみが「現在」。
+   - `PUT /api/routine`（全体更新）: 新しい `date`（既定は今日）でスナップショットを積み直す。
+   - `PATCH /api/routine/exercises/{name}`（単一種目）: **最新スナップショットを in-place 更新**（現行 `cmd_update_exercise` 準拠。新スナップショットは作らない）。レスポンスの `routineDate` は更新対象スナップショットの日付。
 8. **RPE 自動算出**: 未指定 + avg/max HR あり → `round(avg/max*10)` を 1–10 にクランプ。
 9. **プロフィール値**（体重 86kg 等）は現行スクリプトにハードコード。Web 版は `profile` テーブル化。Volume Load の結果が体重設定に依存する点に注意。
 10. **タイムゾーン**: `Asia/Tokyo` 固定。`date` は文字列。サーバの「今日」判定は JST で行う。

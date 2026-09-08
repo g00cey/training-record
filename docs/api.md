@@ -160,6 +160,7 @@ PATCH /api/routine/exercises/ヒップストラスト
 - 存在しない種目名 → ルーティン末尾に追加（`action: "added"`）
 - ルーティン未登録 → `404`
 - URL の種目名は要 URL エンコード
+- **最新スナップショットを in-place 更新**（新スナップショットは作らない）。`routineDate` は更新対象スナップショットの日付
 
 ### 種目マスタ
 ```
@@ -275,7 +276,20 @@ GET /api/sessions/last
 }
 ```
 
-JSON キーは **camelCase**。DB は snake_case（境界で変換）。
+JSON キーは **camelCase**。DB は snake_case（境界で変換）。リクエストボディは camelCase / snake_case どちらも受理（スピン・プロフィール）。未知フィールドは無視。
+
+## 実装で確定した挙動（2026-09-08）
+
+初回実装で docs との差分を吸収した点。テスト・Hermes 連携はこちらに合わせる。
+
+- `GET /api/history?limit=` … CLI 対応表にあるがエンドポイント一覧から漏れていた。`{ "strengthSessions": [...], "spinSessions": [...] }`（`limit` 既定 10、日付降順）で実装
+- `POST /api/strength-sessions/{date}/exercises` … 対象日付が未登録なら**セッションを新規作成**して追記（現行 `--append` フォールバック準拠）。`200`、`notes` は `"; "` 連結
+- `PUT /api/strength-sessions/{date}/exercises:reorder` … `orderedIds` にそのセッションに属さない id → `422 unprocessable`
+- `GET /api/volume?exercise=` の `weight` … 記録された生の重量（自重種目は `null`）。`volumeLoad` には自重体重の代入を適用
+- カレンダー `kind` 判定 … `自重なし` / `自重無し` を除去してから `自重` 部分一致を見る（「（自重なし）」を `bodyweight_and_fw` に誤分類しない）
+- エラーコード … 構造・フォーマット不正 → `bad_request`(400)、意味的なフィールド不正（`reps` 欠落・`rpe` が 1–10 外）→ `unprocessable`(422)。不明ルート → JSON の `not_found`
+- タイムスタンプ … アプリ書き込み分は RFC3339 `+09:00`。レガシー `YYYY-MM-DD HH:MM:SS`(UTC) は読み取り時に変換
+- 丸め … `volumeLoad` と load-report 合計は整数、`acwr` 2 桁、`spinTrimp` / `volumeLoadPerBw` / `bmi` 1 桁
 
 ## Hermes Agent 側の移行
 
