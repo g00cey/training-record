@@ -290,11 +290,13 @@ type WeeklySpinStats struct {
 	Sessions         []WeeklySpinSession `json:"sessions"`
 }
 
-// WeeklySummaryBlock is the "summary" object.
+// WeeklySummaryBlock is the "summary" object. spinSessions and
+// strengthSessions are always objects (never null): when there is no data
+// in the week they carry zero counts and an empty sessions list.
 type WeeklySummaryBlock struct {
-	TotalTrainingSessions int                  `json:"totalTrainingSessions"`
-	SpinSessions          *WeeklySpinStats     `json:"spinSessions"`
-	StrengthSessions      *WeeklyStrengthStats `json:"strengthSessions"`
+	TotalTrainingSessions int                 `json:"totalTrainingSessions"`
+	SpinSessions          WeeklySpinStats     `json:"spinSessions"`
+	StrengthSessions      WeeklyStrengthStats `json:"strengthSessions"`
 }
 
 // WeeklyResult is the GET /api/summary/weekly payload.
@@ -336,8 +338,11 @@ func (s *Service) WeeklySummary() (*WeeklyResult, error) {
 		},
 	}
 
-	var spinStats *WeeklySpinStats
-	if len(spins) > 0 {
+	// spinStats / strengthStats are always well-formed objects; when the
+	// week has no data they stay at their zero values with empty slices.
+	spinStats := WeeklySpinStats{Sessions: []WeeklySpinSession{}}
+	hasSpin := len(spins) > 0
+	if hasSpin {
 		totalMin := 0
 		var avgSum, avgCnt int
 		var maxEver *int
@@ -363,12 +368,10 @@ func (s *Service) WeeklySummary() (*WeeklyResult, error) {
 				Zones:    domain.ParseHeartRateZones(sp.Notes),
 			})
 		}
-		spinStats = &WeeklySpinStats{
-			TotalSessions: len(spins),
-			TotalMinutes:  totalMin,
-			AvgDuration:   roundHalfUp(float64(totalMin) / float64(len(spins))),
-			Sessions:      sessions,
-		}
+		spinStats.TotalSessions = len(spins)
+		spinStats.TotalMinutes = totalMin
+		spinStats.AvgDuration = roundHalfUp(float64(totalMin) / float64(len(spins)))
+		spinStats.Sessions = sessions
 		if avgCnt > 0 {
 			v := roundHalfUp(float64(avgSum) / float64(avgCnt))
 			spinStats.AvgHeartRate = &v
@@ -376,8 +379,9 @@ func (s *Service) WeeklySummary() (*WeeklyResult, error) {
 		spinStats.MaxHeartRateEver = maxEver
 	}
 
-	var strengthStats *WeeklyStrengthStats
-	if len(strengths) > 0 {
+	strengthStats := WeeklyStrengthStats{Sessions: []WeeklyStrengthSession{}}
+	hasStrength := len(strengths) > 0
+	if hasStrength {
 		sessions := make([]WeeklyStrengthSession, 0, len(strengths))
 		totalEx := 0
 		for _, ss := range strengths {
@@ -390,15 +394,9 @@ func (s *Service) WeeklySummary() (*WeeklyResult, error) {
 			totalEx += len(ss.Exercises)
 			sessions = append(sessions, WeeklyStrengthSession{Date: ss.Date, Notes: ss.Notes, Exercises: exs})
 		}
-		avg := 0
-		if len(strengths) > 0 {
-			avg = roundHalfUp(float64(totalEx) / float64(len(strengths)))
-		}
-		strengthStats = &WeeklyStrengthStats{
-			TotalSessions:          len(strengths),
-			AvgExercisesPerSession: avg,
-			Sessions:               sessions,
-		}
+		strengthStats.TotalSessions = len(strengths)
+		strengthStats.AvgExercisesPerSession = roundHalfUp(float64(totalEx) / float64(len(strengths)))
+		strengthStats.Sessions = sessions
 	}
 
 	total := len(spins) + len(strengths)
@@ -419,7 +417,7 @@ func (s *Service) WeeklySummary() (*WeeklyResult, error) {
 	default:
 		eval = append(eval, "⚠️ トレーニング頻度：やや少ない（2回以下/週）")
 	}
-	if spinStats != nil {
+	if hasSpin {
 		if spinStats.TotalSessions >= 3 {
 			eval = append(eval, "✅ スピンバイク：頻度良好")
 		} else if spinStats.TotalSessions == 1 {
@@ -431,7 +429,7 @@ func (s *Service) WeeklySummary() (*WeeklyResult, error) {
 			eval = append(eval, "💡 平均心拍数：やや低め。強度を上げると効果的")
 		}
 	}
-	if strengthStats != nil {
+	if hasStrength {
 		if strengthStats.TotalSessions >= 3 {
 			eval = append(eval, "✅ 筋トレ：頻度良好")
 		} else if strengthStats.TotalSessions == 1 {

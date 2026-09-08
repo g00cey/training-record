@@ -472,6 +472,39 @@ func TestCalendarVolumeSummary(t *testing.T) {
 	}
 }
 
+func TestWeeklySummaryAlwaysObjects(t *testing.T) {
+	c := newClient(t)
+
+	// Empty DB: the week has neither spin nor strength data. Both blocks
+	// must still be objects (never null) with zero counts and [] sessions.
+	w := c.req("GET", "/api/summary/weekly", "")
+	if w.Code != 200 {
+		t.Fatalf("weekly code = %d (%s)", w.Code, w.Body.String())
+	}
+	m := decode(t, w)
+	sum := m["summary"].(map[string]any)
+
+	for _, key := range []string{"spinSessions", "strengthSessions"} {
+		block, ok := sum[key].(map[string]any)
+		if !ok {
+			t.Fatalf("summary.%s is not an object: %#v", key, sum[key])
+		}
+		if block["totalSessions"].(float64) != 0 {
+			t.Errorf("summary.%s.totalSessions = %v, want 0", key, block["totalSessions"])
+		}
+		sessions, ok := block["sessions"].([]any)
+		if !ok || len(sessions) != 0 {
+			t.Errorf("summary.%s.sessions must be an empty array, got %#v", key, block["sessions"])
+		}
+	}
+
+	// Raw check: the JSON must not contain a null for these keys.
+	if strings.Contains(w.Body.String(), `"spinSessions":null`) ||
+		strings.Contains(w.Body.String(), `"strengthSessions":null`) {
+		t.Fatalf("weekly summary still emits null blocks: %s", w.Body.String())
+	}
+}
+
 func TestErrorEnvelopeShape(t *testing.T) {
 	c := newClient(t)
 	w := c.req("GET", "/api/strength-sessions/2099-01-01", "")

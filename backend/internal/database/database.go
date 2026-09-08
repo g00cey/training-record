@@ -23,20 +23,20 @@ import (
 func Open(path string) (*sql.DB, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create db dir: %w", err)
+			return nil, fmt.Errorf("create db directory %q: %w", dir, err)
 		}
 	}
 	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open sqlite %q: %w", path, err)
 	}
 	// SQLite tolerates a single writer; keep one connection to avoid
 	// SQLITE_BUSY under the app's light single-user load.
 	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("open database file %q (check that the directory exists and is writable by this user): %w", path, err)
 	}
 	return db, nil
 }
