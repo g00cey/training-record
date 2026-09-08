@@ -38,9 +38,9 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 | `last-session` | `GET /api/sessions/last` |
 | `summary` | `GET /api/summary` |
 | `weekly-summary` | `GET /api/summary/weekly` |
-| `get-routine` / `show-routine` | `GET /api/routine` |
-| `update-routine` | `PUT /api/routine` |
-| `update-exercise` | `PATCH /api/routine/exercises/{name}` |
+| `get-routine` / `show-routine` | `GET /api/presets` / `GET /api/presets/{name}`（旧 `GET /api/routine` は結合ビューとして残置） |
+| `update-routine` | `PUT /api/presets/{name}` |
+| `update-exercise` | `PATCH /api/presets/{name}/exercises/{exName}` |
 | `get-exercise-list` | `GET /api/exercises` |
 | （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
 
@@ -135,35 +135,74 @@ DELETE /api/spin-sessions/2026-07-22        → 204
 ```
 `rpe` が `null` かつ `avg_heart_rate` と `max_heart_rate` があれば `round(avg/max*10)` を 1–10 にクランプして保存（現行踏襲）。
 
-### ルーティン（プリセット）
+### プリセット（名前付きメニュー）
+
+自重 / FW などを名前付きプリセットとして複数保持する。記録フォームは複数プリセットを選んで**加算的に**種目を補完する（→ frontend）。
+
+```
+GET /api/presets
+→ 200 { "presets": [
+    { "name": "自重", "sortOrder": 0, "exerciseCount": 9,  "latestDate": "2026-07-30" },
+    { "name": "FW",   "sortOrder": 1, "exerciseCount": 13, "latestDate": "2026-07-30" }
+  ] }
+
+GET /api/presets/自重
+→ 200 { "name": "自重", "date": "2026-07-30",
+        "exercises": [ { "name": "懸垂", "weight": null, "reps": 10, "sets": 1 }, ... ] }
+   | 404 (プリセットが無い / スナップショットが無い)
+
+GET /api/presets/自重/history      → 200 { "snapshots": [ { "date": "2026-07-30", "exerciseCount": 9 }, { "date": "2026-07-03", "exerciseCount": 9 } ] }
+GET /api/presets/自重/2026-07-03   → 200 (指定スナップショット) | 404
+```
+- URL のプリセット名・種目名は要 URL エンコード。
+
+#### プリセット作成 / 並べ替え / 削除
+```
+POST /api/presets            { "name": "コンディショニング", "sortOrder": 2 }  → 201 { "name": ..., "sortOrder": 2 }
+                             既存名 → 409 conflict
+PUT  /api/presets:reorder    { "order": ["FW", "自重", "コンディショニング"] }   → 200 { "presets": [...] }
+DELETE /api/presets/コンディショニング  → 204  (そのプリセットの routine_snapshots も削除)
+```
+
+#### プリセット全体を更新（新スナップショットを積む＝履歴 +1。日付は今日）
+```
+PUT /api/presets/自重
+{ "exercises": [ { "name": "懸垂", "weight": null, "reps": 10, "sets": 1 }, ... ] }
+→ 200 { "name": "自重", "date": "<today>", "exercises": [...] }
+```
+- プリセットが未登録なら**作成**（末尾の `sortOrder`）してからスナップショットを積む。
+- 任意で `{ "date": "2026-09-08", "exercises": [...] }` と明示可。
+
+#### 単一種目の部分更新（現行 `update-exercise` 相当）
+```
+PATCH /api/presets/自重/exercises/懸垂
+{ "reps": 12 }              // weight / reps / sets のうち送ったものだけ変更
+→ 200 { "action": "updated", "exercise": "懸垂", "preset": "自重", "presetDate": "2026-07-30" }
+```
+- 存在しない種目名 → そのプリセットの最新スナップショット末尾に追加（`action: "added"`）
+- プリセット未登録 → `404`
+- **最新スナップショットを in-place 更新**（履歴は増やさない）
+
+### ルーティン（旧・互換読み取り）
+
+`GET /api/routine` は全プリセットの最新を `sortOrder` 順に結合した読み取りビュー。Hermes 連携（Phase 5）まで残す。
 
 ```
 GET /api/routine
-→ 200 { "date": "2026-07-30", "exercises": [ { "name": "...", "weight": 38, "reps": 40, "sets": 1 }, ... ] }
-   | 404 { "error": { "code": "not_found", "message": "no routine" } }
+→ 200 { "date": "<全プリセット最新日の max>",
+        "presets": ["自重", "FW"],
+        "exercises": [ ...自重の全種目, ...FW の全種目 ] }   // exercises は preset 順→sort_order 順
+   | 404 (プリセットが 1 つも無い)
 
-GET /api/routine/history       → 200 { "snapshots": [ { "date": "2026-07-30", "exerciseCount": 22 }, ... ] }
-GET /api/routine/2026-07-03    → 200 (指定スナップショット) | 404
-```
+GET /api/routine/history     → 200 { "snapshots": [ { "date": "2026-07-30", "exerciseCount": 22 }, ... ] }  // 全プリセット合算
+GET /api/routine/2026-07-03  → 200 (その日の全プリセット結合) | 404
 
-#### ルーティン全体を更新（新スナップショットを積む。日付は今日）
+PUT   /api/routine                    → 400 bad_request  { "message": "use PUT /api/presets/{name}" }（廃止）
+PATCH /api/routine/exercises/{name}   → 全プリセットの最新スナップショットを横断検索して該当種目を in-place 更新。
+                                        複数プリセットに同名種目があれば sortOrder 最小のプリセットを対象。
+                                        どこにも無ければ 404（この経路では追加しない）。
+                                        → 200 { "action": "updated", "exercise": ..., "preset": ..., "presetDate": ... }
 ```
-PUT /api/routine
-{ "exercises": [ { "name": "ヒップストラスト", "weight": 40, "reps": 40, "sets": 1 }, ... ] }
-→ 200 { "date": "<today>", "exercises": [...] }
-```
-任意で `{ "date": "2026-09-08", "exercises": [...] }` と明示可（現行 `update-routine --date`）。
-
-#### 単一種目の部分更新（現行 `update-exercise`）
-```
-PATCH /api/routine/exercises/ヒップストラスト
-{ "weight": 42 }            // weight / reps / sets のうち送ったものだけ変更
-→ 200 { "action": "updated", "exercise": "ヒップストラスト", "routineDate": "2026-07-30" }
-```
-- 存在しない種目名 → ルーティン末尾に追加（`action: "added"`）
-- ルーティン未登録 → `404`
-- URL の種目名は要 URL エンコード
-- **最新スナップショットを in-place 更新**（新スナップショットは作らない）。`routineDate` は更新対象スナップショットの日付
 
 ### 種目マスタ
 ```

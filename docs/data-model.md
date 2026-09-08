@@ -41,19 +41,33 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 | `notes` | TEXT DEFAULT '' | 心拍ゾーン内訳の慣習フォーマットあり → [domain.md](./domain.md) |
 | `created_at` / `updated_at` | TEXT | `updated_at` は**追加** |
 
-### routine_snapshots — プリセット（ルーティン）の履歴
+### presets — プリセット（名前付きメニュー）のメタ（**0002 で追加**）
+| カラム | 型 | 備考 |
+|--------|----|----|
+| `name` | TEXT PRIMARY KEY | プリセット名。例: `自重` / `FW`。ユーザーが追加・改名・削除できる |
+| `sort_order` | INTEGER NOT NULL DEFAULT 0 | 一覧・記録フォームでの表示順 |
+| `created_at` | TEXT NOT NULL DEFAULT (datetime('now')) | |
+
+- 初期データ（seed）: `自重`(0) / `FW`(1)。**`presets` が空のときだけ** seed する（ユーザーが削除したものを復活させない）。
+
+### routine_snapshots — 各プリセットの内容と変更履歴
 | カラム | 型 | 備考 |
 |--------|----|----|
 | `id` | INTEGER PK | |
-| `date` | TEXT NOT NULL | スナップショット日。**UNIQUE ではない**（同日に複数種目行） |
+| `preset` | TEXT NOT NULL DEFAULT '' | **0002 で追加**。どのプリセットのスナップショットか（`presets.name`） |
+| `date` | TEXT NOT NULL | スナップショット日。`(preset, date)` 単位で 1 スナップショット |
 | `exercise_name` | TEXT NOT NULL | ※ API では `name` に正規化 → [api.md](./api.md) |
-| `weight` | REAL | |
+| `weight` | REAL | 自重種目は `NULL` |
 | `reps` | INTEGER NOT NULL | |
 | `sets` | INTEGER DEFAULT 1 | |
-| `sort_order` | INTEGER DEFAULT 0 | |
+| `sort_order` | INTEGER DEFAULT 0 | `(preset, date)` グループ内で 0..n-1 |
 | `created_at` | TEXT | |
+| index | | `idx_rs_preset (preset, date)` を追加 |
 
-- 最新 `date` の行群 = 「現在のルーティン」。`PUT /api/routine`（全体更新）は新しい `date` で全行を積み直す。`PATCH /api/routine/exercises/{name}`（単一種目）は最新スナップショットを in-place 更新する（現行 `cmd_update_exercise` 準拠）。
+- あるプリセットの「現在の内容」= その `preset` の最新 `date` の行群。
+- `PUT /api/presets/{name}`（全体更新）は新しい `date` でそのプリセットの全行を積み直す（＝変更履歴が 1 件増える）。
+- `PATCH /api/presets/{name}/exercises/{exName}`（単一種目）は そのプリセットの最新スナップショットを in-place 更新（現行 `cmd_update_exercise` 準拠。履歴は増やさない）。
+- 旧 `/api/routine` は互換のため残す（全プリセットの最新を結合した読み取りビュー）。→ [api.md](./api.md)
 
 ### profile — ユーザプロフィール（**新規・単一行**）
 | カラム | 型 | 既定 | 用途 |
@@ -104,4 +118,31 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 - 連番 SQL ファイル `backend/migrations/0001_init.sql`, `0002_xxx.sql` …（`embed`）
 - 破壊的変更（列削除・リネーム）は避け、追加中心
 - `training.db` を直接いじらない。変更は必ずマイグレーション経由
+
+## 0002 — プリセットの複数化
+
+`routine_snapshots` の単一ルーティンを、名前付き複数プリセットに分割する。
+
+### `0002_add_presets.sql`（スキーマのみ）
+```sql
+CREATE TABLE IF NOT EXISTS presets (
+  name       TEXT PRIMARY KEY,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+ALTER TABLE routine_snapshots ADD COLUMN preset TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_rs_preset ON routine_snapshots(preset, date);
+```
+
+### データ投入は Go の fixup で（`ensureRoutinePresets`）
+SQL マイグレーションでは分類ロジックを持たせず、起動時 fixup（migrate + bootstrap の後）で行う。fresh DB（0001+0002 → bootstrap で `preset=''` の行が入る）と既存 DB（0002 で列追加のみ）を同じ経路で処理でき、冪等。
+
+1. `SELECT COUNT(*) FROM presets` が 0 のときだけ `自重`(sort_order 0) / `FW`(1) を投入
+2. `routine_snapshots WHERE preset = ''` の各行を分類して `preset` を設定:
+   - `weight IS NULL` → `自重`、それ以外 → `FW`
+   - （既存ルーティンは自重 9 種目が weight NULL、FW 13 種目が weight 有り。旧 2 スナップショット `2026-07-03` / `2026-07-30` の `date` はそのまま保持 → プリセットごとに履歴 2 件になる）
+3. `(preset, date)` グループ内で `sort_order` を 0..n-1 に振り直す
+4. `routine_snapshots` に存在するが `presets` に無い `preset` 名があれば追加（防御的）
+
+一度全行に `preset` が付けば以降は no-op。
 </content>

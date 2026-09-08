@@ -13,7 +13,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 | # | 機能 | 対応ドキュメント |
 |---|------|------------------|
 | 1 | トレーニング記録の CRUD | [api.md](./api.md) 筋トレ/スピンセッション |
-| 2 | トレーニングメニューをプリセット（ルーティン）として保持 | [api.md](./api.md) ルーティン |
+| 2 | トレーニングメニューをプリセットとして保持（自重 / FW など複数・記録フォームで加算選択） | [api.md](./api.md) プリセット、Phase 2.5 |
 | 3 | トレーニング記録の一覧表示 | frontend 一覧画面 |
 | 4 | カレンダー表示 | `GET /api/calendar` + 月グリッド |
 | 5 | ボリュームのグラフ表示 | `GET /api/volume` + Recharts |
@@ -71,6 +71,19 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 - プロフィール設定画面（体重・身長・推定最大心拍）
 
 **完了条件**: ボリューム推移が可視化され、体重設定が結果に反映される
+
+### Phase 2.5 — プリセットの複数化（追加要件）
+
+単一ルーティンを名前付き複数プリセットに拡張。記録フォームで複数プリセットを加算的に選択できる。
+
+- DB: `0002_add_presets.sql`（`presets` テーブル + `routine_snapshots.preset` 列 + index）。起動時 fixup `ensureRoutinePresets`（seed 自重/FW、`preset=''` 行を `weight IS NULL` で分類、`(preset,date)` で `sort_order` 振り直し）→ [data-model.md](./data-model.md)
+- API: `GET /api/presets`・`GET /api/presets/{name}`・`/history`・`/{date}`、`POST /api/presets`、`PUT /api/presets:reorder`、`DELETE /api/presets/{name}`、`PUT /api/presets/{name}`、`PATCH /api/presets/{name}/exercises/{exName}`。旧 `GET /api/routine` は結合ビューとして残置、`PUT /api/routine` は 400（廃止）→ [api.md](./api.md)
+- frontend:
+  - `/routine`（プリセット管理）: プリセット一覧・作成・改名・削除・並べ替え、各プリセットの種目編集（`PUT`）・単一種目編集（`PATCH`）・履歴表示
+  - 記録フォームの「プリセットから記録」を**複数選択**に変更。プリセットを ON にするとその種目を行として**追記**（選択順）。OFF にするとそのプリセット由来の行だけ除去（手動で追加・編集した行は残す）。各行に `sourcePreset` を持たせ、ユーザーが編集したら `sourcePreset` を外して OFF でも残す
+  - 例: 「自重」ON → 自重 9 種目。続けて「FW」ON → 自重 9 + FW 13 = 22 行
+
+**完了条件**: 記録フォームで自重・FW を個別/複合で選べ、加算・除去が仕様どおり動く。既存ルーティンが自重/FW 2 プリセットに分割移行されている
 
 ### Phase 5 — Hermes 連携
 - API 全体を Hermes からの利用前提で仕上げ（エラー形・認証・CORS 不要確認）
