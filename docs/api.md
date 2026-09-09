@@ -214,12 +214,12 @@ GET /api/routine/history     → 200 { "snapshots": [ { "date": "2026-07-30", "e
 GET /api/routine/2026-07-03  → 200 (その日の全プリセット結合) | 404
 
 PUT   /api/routine                    → 400 bad_request  { "message": "use PUT /api/presets/{name}" }（廃止）
-PATCH /api/routine/exercises/{name}?exerciseId={exerciseId}
+PATCH /api/routine/exercises/{name}
                                         → 全プリセットの最新スナップショットを横断検索して該当種目を in-place 更新。
-                                        `exerciseId` が指定されている場合はその ID の種目を更新（同名種目の個別指定が可能）。
-                                        `exerciseId` が指定されていない場合は、複数プリセットに同名種目があれば sortOrder 最小のプリセットを対象。
+                                        複数プリセットに同名種目があれば sortOrder 最小のプリセットを対象。
+                                        同名種目を個別に更新したい場合は PATCH /api/presets/{name}/exercises/{exerciseId} を使う。
                                         どこにも無ければ 404（この経路では追加しない）。
-                                        → 200 { "action": "updated", "exerciseId": ..., "exercise": ..., "preset": ..., "presetDate": ... }
+                                        → 200 { "action": "updated", "exercise": ..., "preset": ..., "presetDate": ... }
 ```
 
 ### 種目マスタ
