@@ -36,3 +36,7 @@ Thumbs.db
 
 # --- Claude Code local state ---
 .claude/
+
+# --- python ---
+__pycache__/
+*.pyc

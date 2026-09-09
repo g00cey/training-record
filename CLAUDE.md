@@ -43,10 +43,11 @@ training-record/
 training-record/
 ├── CLAUDE.md / docs/
 ├── compose.yaml / compose.dev.yaml / .env.example
-├── frontend/   # Next.js（1 compose サービス）
-├── backend/    # Go REST API（1 compose サービス）
-├── nginx/      # リバースプロキシ（1 compose サービス）
-└── skill/      # 既存資産（不変）
+├── frontend/      # Next.js（1 compose サービス）
+├── backend/       # Go REST API（1 compose サービス）
+├── nginx/         # リバースプロキシ（1 compose サービス）
+├── hermes-skill/  # Hermes Agent 向け新スキル（API 版・Phase 5）
+└── skill/         # 既存資産（不変・移行元）
 ```
 
 ## アーキテクチャ（要点）

@@ -85,13 +85,17 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: 記録フォームで自重・FW を個別/複合で選べ、加算・除去が仕様どおり動く。既存ルーティンが自重/FW 2 プリセットに分割移行されている
 
-### Phase 5 — Hermes 連携
-- API 全体を Hermes からの利用前提で仕上げ（エラー形・認証・CORS 不要確認）
-- 新スキル `SKILL.md` を作成（CLI → HTTP に置換、`TRAINING_API_BASE` / `TRAINING_API_KEY`）
-- 旧 `training_db.py` は参照用に残す（skill/ 配下は不変）
-- API リファレンスを Hermes 向けに整理
+### Phase 5 — Hermes 連携 ✅ 実装済み
+- 新スキル一式 `hermes-skill/training-tracker/`（`SKILL.md` v2.0.0 + `scripts/training_api.py` + `references/`）
+- `training_api.py`: Python stdlib（`urllib`）のみ。旧 `training_db.py` とサブコマンド互換。
+  `record-strength` / `record-spin` / `get-history` / `last-session` / `summary` / `weekly-summary` /
+  `load-report` / `get-exercise-list` / `get-routine` / `show-routine` / `get-presets` / `show-preset` /
+  `update-preset` / `update-exercise` / `add-exercise` / `health`
+- 環境変数 `TRAINING_API_BASE` / `TRAINING_API_KEY`。`init` は廃止（サーバ管理）→ `health`
+- 旧 `training_db.py` は `skill/` 配下に不変で残置
+- Hermes への修正依頼文・カットオーバー手順・対応表 → [hermes-integration.md](./hermes-integration.md)
 
-**完了条件**: Hermes Agent が API 経由で記録・参照・ルーティン更新を完結できる
+**完了条件**: Hermes Agent が API 経由で記録・参照・プリセット更新を完結できる（`training_api.py` を稼働中スタックで疎通確認済み）
 
 ### Phase 6 — 故障予防アドバイス（任意）
 - プログレッシブオーバーロード 10% チェック、頻度チェック、警告サイン

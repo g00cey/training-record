@@ -10,10 +10,12 @@
 | [api.md](./api.md) | REST API 仕様（frontend / Hermes 共通） |
 | [infrastructure.md](./infrastructure.md) | docker-compose・nginx・Dockerfile・環境変数 |
 | [domain.md](./domain.md) | ドメイン用語・分析ロジック（Volume Load / ACWR / TRIMP）・落とし穴 |
+| [hermes-integration.md](./hermes-integration.md) | Hermes Agent 連携（Phase 5）・修正依頼文・カットオーバー手順 |
 
 ## ステータス
 
-現状はすべて **設計フェーズ（未実装）**。移行元資産は `skill/` 配下。
+Phase 0〜5 実装済み（独立検証済み）。Phase 6（故障予防アドバイス・任意）は未着手。
+移行元資産は `skill/` 配下（不変）。Hermes 向け配布物は `hermes-skill/` 配下。
 
 ## 決定事項（2026-09-08 確認済み）
 

@@ -206,7 +206,10 @@ POST /api/presets/自重/exercises
 GET /api/routine
 → 200 { "date": "<全プリセット最新日の max>",
         "presets": ["自重", "FW"],
-        "exercises": [ { "id": 4, "name": "懸垂", "weight": null, "reps": 10, "sets": 1, "preset": "自重" }, ... ] }   // exercises は preset 順→sort_order 順
+        "exercises": [ { "id": 4, "name": "懸垂", "weight": null, "reps": 10, "sets": 1, "sortOrder": 0 }, ... ] }
+        // exercises は presets 配列の順（= sortOrder 順）→ 各プリセット内 sort_order 順で連結
+        // ※ 現状は行に preset 名を含めない。どのプリセット由来かは presets 配列の順と件数から判断するか、
+        //    プリセット別に見たい場合は GET /api/presets/{name} を使う
    | 200 { "date": null, "presets": [], "exercises": [] }   // presets はあるがスナップショット未作成
    | 404 (`presets` テーブルが空)
 
@@ -351,9 +354,13 @@ JSON キーは **camelCase**。DB は snake_case（境界で変換）。リク�
 - タイムスタンプ … アプリ書き込み分は RFC3339 `+09:00`。レガシー `YYYY-MM-DD HH:MM:SS`(UTC) は読み取り時に変換
 - 丸め … `volumeLoad` と load-report 合計は整数、`acwr` 2 桁、`spinTrimp` / `volumeLoadPerBw` / `bmi` 1 桁
 
-## Hermes Agent 側の移行
+## Hermes Agent 側の移行（Phase 5・実装済み）
 
-現行スキルは `python3 training_db.py <cmd>` を実行 → 新スキルは `curl`/HTTP でこの API を叩く。
-`SKILL.md` の各ワークフローのコマンド例を、上表の対応でエンドポイント呼び出しに置換する。
-API キーは Hermes 環境の環境変数（例: `TRAINING_API_KEY`, `TRAINING_API_BASE`）で持たせる。
+旧スキルの `python3 training_db.py <cmd>`（ローカル SQLite 直）を、この API を叩く新スキルに置き換えた。
+
+- 新スキル一式: [`hermes-skill/training-tracker/`](../hermes-skill/training-tracker/)
+  （`SKILL.md` v2.0.0 + `scripts/training_api.py` + `references/`）
+- `training_api.py` は Python 標準ライブラリ（`urllib`）のみ。旧 `training_db.py` とサブコマンド名・引数を極力維持
+- Hermes 環境の環境変数: `TRAINING_API_BASE`（例 `http://192.168.1.50/api`）/ `TRAINING_API_KEY`（backend の `API_KEY` と同値）
+- **Hermes Agent への具体的な修正依頼文・カットオーバー手順・サブコマンド対応表 → [hermes-integration.md](./hermes-integration.md)**
 </content>
