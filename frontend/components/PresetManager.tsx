@@ -317,8 +317,9 @@ function PresetCard({
                 <div className="space-y-2">
                   {detail.data.exercises.map((ex, i) => (
                     <PresetRowInline
-                      key={`${ex.name}-${i}`}
+                      key={`${ex.id}-${i}`}
                       presetName={summary.name}
+                      exerciseId={ex.id}
                       index={i}
                       name={ex.name}
                       weight={ex.weight}
@@ -358,6 +359,7 @@ function PresetCard({
 
 function PresetRowInline({
   presetName,
+  exerciseId,
   index,
   name,
   weight,
@@ -367,6 +369,7 @@ function PresetRowInline({
   onError,
 }: {
   presetName: string;
+  exerciseId: number;
   index: number;
   name: string;
   weight: number | null;
@@ -392,7 +395,7 @@ function PresetRowInline({
       if (rn !== null) body.reps = rn;
       if (sn !== null) body.sets = sn;
       const res = await apiMutate<{ action?: string; presetDate?: string }>(
-        `/presets/${enc(presetName)}/exercises/${enc(name)}`,
+        `/presets/${enc(presetName)}/exercises/${exerciseId}`,
         'PATCH',
         body,
       );

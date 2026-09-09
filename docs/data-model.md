@@ -66,7 +66,7 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 
 - あるプリセットの「現在の内容」= その `preset` の最新 `date` の行群。
 - `PUT /api/presets/{name}`（全体更新）は新しい `date` でそのプリセットの全行を積み直す（＝変更履歴が 1 件増える）。
-- `PATCH /api/presets/{name}/exercises/{exName}`（単一種目）は そのプリセットの最新スナップショットを in-place 更新（現行 `cmd_update_exercise` 準拠。履歴は増やさない）。
+- `PATCH /api/presets/{name}/exercises/{exerciseId}`（単一種目）は そのプリセットの最新スナップショットを in-place 更新（現行 `cmd_update_exercise` 準拠。履歴は増やさない）。`exerciseId` で個別指定するため、同名種目が複数ある場合でも個別に更新可能。
 - 旧 `/api/routine` は互換のため残す（全プリセットの最新を結合した読み取りビュー）。→ [api.md](./api.md)
 
 ### profile — ユーザプロフィール（**新規・単一行**）

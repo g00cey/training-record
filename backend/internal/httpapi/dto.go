@@ -73,16 +73,25 @@ func toSpinDTO(s *domain.SpinSession) spinSessionDTO {
 // routineExerciseDTO is the API representation of a routine/preset exercise
 // (exercise_name -> name).
 type routineExerciseDTO struct {
-	Name   string   `json:"name"`
-	Weight *float64 `json:"weight"`
-	Reps   int      `json:"reps"`
-	Sets   int      `json:"sets"`
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Weight    *float64 `json:"weight"`
+	Reps      int      `json:"reps"`
+	Sets      int      `json:"sets"`
+	SortOrder int      `json:"sortOrder"`
 }
 
 func toRoutineExerciseDTOs(exs []domain.RoutineExercise) []routineExerciseDTO {
 	out := make([]routineExerciseDTO, 0, len(exs))
 	for _, e := range exs {
-		out = append(out, routineExerciseDTO{Name: e.Name, Weight: e.Weight, Reps: e.Reps, Sets: e.Sets})
+		out = append(out, routineExerciseDTO{
+			ID:        e.ID,
+			Name:      e.Name,
+			Weight:    e.Weight,
+			Reps:      e.Reps,
+			Sets:      e.Sets,
+			SortOrder: e.SortOrder,
+		})
 	}
 	return out
 }

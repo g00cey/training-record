@@ -55,7 +55,8 @@ func NewRouter(svc *service.Service, apiKey string) http.Handler {
 	mux.HandleFunc("DELETE /api/presets/{name}", handle(h.deletePreset))
 	mux.HandleFunc("GET /api/presets/{name}/history", handle(h.presetHistory))
 	mux.HandleFunc("GET /api/presets/{name}/{date}", handle(h.getPresetSnapshot))
-	mux.HandleFunc("PATCH /api/presets/{name}/exercises/{exName}", handle(h.patchPresetExercise))
+	mux.HandleFunc("PATCH /api/presets/{name}/exercises/{exerciseId}", handle(h.patchPresetExercise))
+	mux.HandleFunc("POST /api/presets/{name}/exercises", handle(h.addPresetExercise))
 
 	// routine (legacy compat: merged read view over all presets)
 	mux.HandleFunc("GET /api/routine", handle(h.getRoutine))

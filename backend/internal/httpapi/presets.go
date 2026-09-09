@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"training-record/internal/service"
@@ -218,23 +219,63 @@ func (h *Handlers) patchPresetExercise(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return err
 	}
-	exName, err := pathName(r, "exName")
+	exerciseIDStr, err := pathName(r, "exerciseId")
 	if err != nil {
 		return err
+	}
+	exerciseID, err := strconv.ParseInt(exerciseIDStr, 10, 64)
+	if err != nil {
+		return badRequest("exerciseId must be an integer")
 	}
 	weight, reps, sets, err := parseExercisePatch(r)
 	if err != nil {
 		return err
 	}
-	action, presetDate, err := h.svc.PatchPresetExercise(name, exName, weight, reps, sets)
+	action, presetDate, err := h.svc.PatchPresetExercise(name, exerciseID, weight, reps, sets)
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"action":     action,
-		"exercise":   exName,
-		"preset":     name,
-		"presetDate": presetDate,
+		"action":      action,
+		"exerciseId":  exerciseID,
+		"preset":      name,
+		"presetDate":  presetDate,
+	})
+	return nil
+}
+
+func (h *Handlers) addPresetExercise(w http.ResponseWriter, r *http.Request) error {
+	name, err := pathName(r, "name")
+	if err != nil {
+		return err
+	}
+	var b routineExerciseBody
+	if err := decodeBody(r, &b); err != nil {
+		return err
+	}
+	if b.Name == nil || strings.TrimSpace(*b.Name) == "" {
+		return unprocessable("name is required")
+	}
+	if b.Reps == nil {
+		return unprocessable("reps is required")
+	}
+	if *b.Reps < 0 {
+		return unprocessable("reps must be >= 0")
+	}
+	sets := 1
+	if b.Sets != nil && *b.Sets >= 1 {
+		sets = *b.Sets
+	}
+	exerciseID, presetDate, err := h.svc.AddPresetExercise(name, strings.TrimSpace(*b.Name), b.Weight, b.Reps, &sets)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"action":      "added",
+		"exerciseId":  exerciseID,
+		"exercise":    strings.TrimSpace(*b.Name),
+		"preset":      name,
+		"presetDate":  presetDate,
 	})
 	return nil
 }

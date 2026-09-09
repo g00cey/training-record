@@ -273,26 +273,35 @@ func TestPresetStore(t *testing.T) {
 	}
 
 	// PATCH in place: existing -> updated
-	action, pdate, err := st.UpdatePresetExercise("自重", "懸垂", nil, iptr(15), nil)
+	rows, _ := st.PresetSnapshot("自重", "2026-07-30")
+	if len(rows) == 0 {
+		t.Fatal("no exercises in snapshot")
+	}
+	exerciseID := rows[0].ID
+	action, pdate, err := st.UpdatePresetExercise("自重", exerciseID, nil, iptr(15), nil)
 	if err != nil || action != "updated" || pdate != "2026-07-30" {
 		t.Fatalf("patch updated: %q %q %v", action, pdate, err)
 	}
-	rows, _ := st.PresetSnapshot("自重", "2026-07-30")
+	rows, _ = st.PresetSnapshot("自重", "2026-07-30")
 	if len(rows) != 1 || rows[0].Reps != 15 {
 		t.Fatalf("patch not applied: %+v", rows)
 	}
-	// PATCH missing -> added at end
-	action, _, err = st.UpdatePresetExercise("自重", "新種目", nil, iptr(20), nil)
-	if err != nil || action != "added" {
-		t.Fatalf("patch added: %q %v", action, err)
-	}
-	rows, _ = st.PresetSnapshot("自重", "2026-07-30")
-	if len(rows) != 2 || rows[1].Name != "新種目" || rows[1].SortOrder != 1 {
-		t.Fatalf("patch add result: %+v", rows)
+	// PATCH missing exerciseID -> ErrNotFound
+	if _, _, err := st.UpdatePresetExercise("自重", 99999, nil, iptr(1), nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 	// PATCH on unknown preset -> ErrNotFound
-	if _, _, err := st.UpdatePresetExercise("無い", "x", nil, iptr(1), nil); !errors.Is(err, store.ErrNotFound) {
+	if _, _, err := st.UpdatePresetExercise("無い", exerciseID, nil, iptr(1), nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	// Add new exercise
+	addedID, _, err := st.AddPresetExercise("自重", "新種目", nil, iptr(20), iptr(1))
+	if err != nil {
+		t.Fatalf("add exercise: %v", err)
+	}
+	rows, _ = st.PresetSnapshot("自重", "2026-07-30")
+	if len(rows) != 2 || rows[1].Name != "新種目" || rows[1].ID != addedID {
+		t.Fatalf("add result: %+v", rows)
 	}
 
 	// reorder: FW first, unknown names ignored, 自重 kept at end

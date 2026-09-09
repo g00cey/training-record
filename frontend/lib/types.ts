@@ -45,10 +45,12 @@ export type SpinSessionList = {
 };
 
 export type RoutineExercise = {
+  id: number;
   name: string;
   weight: number | null;
   reps: number;
   sets: number;
+  sortOrder: number;
 };
 
 // 旧・互換読み取りビュー（GET /api/routine）。書き込みは presets に一本化済み。

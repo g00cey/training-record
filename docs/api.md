@@ -148,7 +148,7 @@ GET /api/presets
 
 GET /api/presets/自重
 → 200 { "name": "自重", "date": "2026-07-30",
-        "exercises": [ { "name": "懸垂", "weight": null, "reps": 10, "sets": 1 }, ... ] }
+        "exercises": [ { "id": 4, "name": "懸垂", "weight": null, "reps": 10, "sets": 1 }, ... ] }
    | 404 (プリセットが無い / スナップショットが無い)
 
 GET /api/presets/自重/history      → 200 { "snapshots": [ { "date": "2026-07-30", "exerciseCount": 9 }, { "date": "2026-07-03", "exerciseCount": 9 } ] }
@@ -178,14 +178,25 @@ PUT /api/presets/自重
 
 #### 単一種目の部分更新（現行 `update-exercise` 相当）
 ```
-PATCH /api/presets/自重/exercises/懸垂
-{ "reps": 12 }              // weight / reps / sets のうち送ったものだけ変更
-→ 200 { "action": "updated", "exercise": "懸垂", "preset": "自重", "presetDate": "2026-07-30" }
+PATCH /api/presets/自重/exercises/{exerciseId}
+{ "name": "懸垂（狭）", "reps": 12 }   // name / weight / reps / sets のうち送ったものだけ変更
+→ 200 { "action": "updated", "exerciseId": 4, "exercise": "懸垂（狭）", "preset": "自重", "presetDate": "2026-07-30" }
 ```
-- 存在しない種目名 → そのプリセットの最新スナップショット末尾に追加（`action: "added"`）
+- `exerciseId` は `routine_snapshots.id`。同名種目が複数ある場合でも個別に指定可能
+- 存在しない `exerciseId` → `404`
 - プリセット未登録（`presets` に無い名前）→ `404`
-- 登録済みだがスナップショット未作成（`POST /api/presets` 直後など）→ 今日付でスナップショットを作成し追加（`action: "added"`）
+- 登録済みだがスナップショット未作成（`POST /api/presets` 直後など）→ `404`（スナップショットが存在しない場合は追加しない）
 - **最新スナップショットを in-place 更新**（履歴は増やさない）
+
+#### 種目の追加（新規）
+```
+POST /api/presets/自重/exercises
+{ "name": "懸垂（狭）", "weight": null, "reps": 10, "sets": 1 }
+→ 201 { "action": "added", "exerciseId": 42, "exercise": "懸垂（狭）", "preset": "自重", "presetDate": "2026-07-30" }
+```
+- プリセット未登録（`presets` に無い名前）→ `404`
+- 登録済みだがスナップショット未作成 → 今日付でスナップショットを作成し追加
+- 既存種目と同名でも追加可能（同名種目の複数登録を許容）
 
 ### ルーティン（旧・互換読み取り）
 
@@ -195,7 +206,7 @@ PATCH /api/presets/自重/exercises/懸垂
 GET /api/routine
 → 200 { "date": "<全プリセット最新日の max>",
         "presets": ["自重", "FW"],
-        "exercises": [ ...自重の全種目, ...FW の全種目 ] }   // exercises は preset 順→sort_order 順
+        "exercises": [ { "id": 4, "name": "懸垂", "weight": null, "reps": 10, "sets": 1, "preset": "自重" }, ... ] }   // exercises は preset 順→sort_order 順
    | 200 { "date": null, "presets": [], "exercises": [] }   // presets はあるがスナップショット未作成
    | 404 (`presets` テーブルが空)
 
@@ -203,10 +214,12 @@ GET /api/routine/history     → 200 { "snapshots": [ { "date": "2026-07-30", "e
 GET /api/routine/2026-07-03  → 200 (その日の全プリセット結合) | 404
 
 PUT   /api/routine                    → 400 bad_request  { "message": "use PUT /api/presets/{name}" }（廃止）
-PATCH /api/routine/exercises/{name}   → 全プリセットの最新スナップショットを横断検索して該当種目を in-place 更新。
-                                        複数プリセットに同名種目があれば sortOrder 最小のプリセットを対象。
+PATCH /api/routine/exercises/{name}?exerciseId={exerciseId}
+                                        → 全プリセットの最新スナップショットを横断検索して該当種目を in-place 更新。
+                                        `exerciseId` が指定されている場合はその ID の種目を更新（同名種目の個別指定が可能）。
+                                        `exerciseId` が指定されていない場合は、複数プリセットに同名種目があれば sortOrder 最小のプリセットを対象。
                                         どこにも無ければ 404（この経路では追加しない）。
-                                        → 200 { "action": "updated", "exercise": ..., "preset": ..., "presetDate": ... }
+                                        → 200 { "action": "updated", "exerciseId": ..., "exercise": ..., "preset": ..., "presetDate": ... }
 ```
 
 ### 種目マスタ

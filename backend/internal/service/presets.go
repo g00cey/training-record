@@ -176,14 +176,25 @@ func (s *Service) ReplacePreset(name, date string, in []RoutineExerciseInput) (*
 	return &PresetSnapshot{Name: name, Date: date, Exercises: exs}, nil
 }
 
-// PatchPresetExercise updates or appends one exercise in a preset's latest
-// snapshot; apperr.NotFound when the preset does not exist.
-func (s *Service) PatchPresetExercise(name, exName string, weight *float64, reps, sets *int) (action, presetDate string, err error) {
-	action, presetDate, err = s.st.UpdatePresetExercise(name, exName, weight, reps, sets)
+// PatchPresetExercise updates one exercise in a preset's latest snapshot;
+// apperr.NotFound when the preset does not exist or the exercise id is not
+// found in the preset's latest snapshot.
+func (s *Service) PatchPresetExercise(name string, exerciseID int64, weight *float64, reps, sets *int) (action, presetDate string, err error) {
+	action, presetDate, err = s.st.UpdatePresetExercise(name, exerciseID, weight, reps, sets)
 	if errors.Is(err, store.ErrNotFound) {
-		return "", "", apperr.NotFoundf("preset %q not found", name)
+		return "", "", apperr.NotFoundf("preset %q or exercise %d not found", name, exerciseID)
 	}
 	return action, presetDate, err
+}
+
+// AddPresetExercise adds a new exercise to a preset's latest snapshot;
+// apperr.NotFound when the preset does not exist.
+func (s *Service) AddPresetExercise(name, exName string, weight *float64, reps, sets *int) (exerciseID int64, presetDate string, err error) {
+	exerciseID, presetDate, err = s.st.AddPresetExercise(name, exName, weight, reps, sets)
+	if errors.Is(err, store.ErrNotFound) {
+		return 0, "", apperr.NotFoundf("preset %q not found", name)
+	}
+	return exerciseID, presetDate, err
 }
 
 // ---------------------------------------------------------------------------

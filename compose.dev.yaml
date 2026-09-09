@@ -29,7 +29,7 @@ services:
 
   nginx:
     ports:
-      - "8080:80"   # dev はホスト 8080 で公開
+      - "8081:80"   # dev はホスト 8081 で公開（8080は既に使用中のため）
 
 volumes:
   go-mod-cache:

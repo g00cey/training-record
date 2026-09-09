@@ -98,6 +98,7 @@ type SpinSession struct {
 
 // RoutineExercise is one exercise inside a routine snapshot.
 type RoutineExercise struct {
+	ID        int64
 	Name      string
 	Weight    *float64
 	Reps      int

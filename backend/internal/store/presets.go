@@ -226,7 +226,7 @@ func scanRoutineExercises(rows *sql.Rows) ([]domain.RoutineExercise, error) {
 	for rows.Next() {
 		var e domain.RoutineExercise
 		var w sql.NullFloat64
-		if err := rows.Scan(&e.Name, &w, &e.Reps, &e.Sets, &e.SortOrder); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &w, &e.Reps, &e.Sets, &e.SortOrder); err != nil {
 			return nil, err
 		}
 		e.Weight = nfloat(w)
@@ -238,7 +238,7 @@ func scanRoutineExercises(rows *sql.Rows) ([]domain.RoutineExercise, error) {
 // PresetSnapshot returns the exercise rows for (preset, date), sort_order order.
 func (s *Store) PresetSnapshot(preset, date string) ([]domain.RoutineExercise, error) {
 	rows, err := s.db.Query(
-		`SELECT exercise_name, weight, reps, COALESCE(sets,1), COALESCE(sort_order,0)
+		`SELECT id, exercise_name, weight, reps, COALESCE(sets,1), COALESCE(sort_order,0)
 		   FROM routine_snapshots WHERE preset = ? AND date = ? ORDER BY sort_order, id`, preset, date)
 	if err != nil {
 		return nil, err
@@ -293,11 +293,10 @@ func (s *Store) ReplacePresetSnapshot(preset, date string, exs []domain.RoutineE
 	})
 }
 
-// UpdatePresetExercise patches weight/reps/sets of one exercise in the
-// latest snapshot of preset (in place; no new history). A missing exercise
-// is appended (action "added"). If the preset has no snapshot yet, one is
-// created dated today. ErrNotFound if the preset does not exist.
-func (s *Store) UpdatePresetExercise(preset, name string, weight *float64, reps, sets *int) (action, presetDate string, err error) {
+// AddPresetExercise adds a new exercise to the latest snapshot of preset.
+// If the preset has no snapshot yet, one is created dated today. ErrNotFound
+// if the preset does not exist.
+func (s *Store) AddPresetExercise(preset, name string, weight *float64, reps, sets *int) (exerciseID int64, presetDate string, err error) {
 	err = s.tx(func(tx *sql.Tx) error {
 		var n int
 		if e := tx.QueryRow(`SELECT COUNT(*) FROM presets WHERE name = ?`, preset).Scan(&n); e != nil {
@@ -317,40 +316,6 @@ func (s *Store) UpdatePresetExercise(preset, name string, weight *float64, reps,
 		}
 		presetDate = date
 
-		var cnt int
-		if e := tx.QueryRow(
-			`SELECT COUNT(*) FROM routine_snapshots WHERE preset = ? AND date = ? AND exercise_name = ?`,
-			preset, date, name).Scan(&cnt); e != nil {
-			return e
-		}
-		if cnt > 0 {
-			set := ""
-			var args []any
-			add := func(frag string, v any) {
-				if set != "" {
-					set += ", "
-				}
-				set += frag
-				args = append(args, v)
-			}
-			if weight != nil {
-				add("weight = ?", *weight)
-			}
-			if reps != nil {
-				add("reps = ?", *reps)
-			}
-			if sets != nil {
-				add("sets = ?", *sets)
-			}
-			action = "updated"
-			if set == "" {
-				return nil
-			}
-			args = append(args, preset, date, name)
-			_, e := tx.Exec(`UPDATE routine_snapshots SET `+set+` WHERE preset = ? AND date = ? AND exercise_name = ?`, args...)
-			return e
-		}
-
 		var nextOrder int
 		if e := tx.QueryRow(
 			`SELECT COALESCE(MAX(sort_order), -1) + 1 FROM routine_snapshots WHERE preset = ? AND date = ?`,
@@ -365,14 +330,78 @@ func (s *Store) UpdatePresetExercise(preset, name string, weight *float64, reps,
 		if sets != nil {
 			st = *sets
 		}
-		if _, e := tx.Exec(
+		result, e := tx.Exec(
 			`INSERT INTO routine_snapshots (preset, date, exercise_name, weight, reps, sets, sort_order, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			preset, date, name, pfloat(weight), r, st, nextOrder, domain.NowRFC3339()); e != nil {
+			preset, date, name, pfloat(weight), r, st, nextOrder, domain.NowRFC3339())
+		if e != nil {
 			return e
 		}
-		action = "added"
-		return nil
+		exerciseID, e = result.LastInsertId()
+		return e
+	})
+	return exerciseID, presetDate, err
+}
+
+// UpdatePresetExercise patches weight/reps/sets of one exercise in the
+// latest snapshot of preset (in place; no new history). The exercise is
+// identified by its id. ErrNotFound if the preset does not exist or the
+// exercise id is not found in the preset's latest snapshot.
+func (s *Store) UpdatePresetExercise(preset string, exerciseID int64, weight *float64, reps, sets *int) (action, presetDate string, err error) {
+	err = s.tx(func(tx *sql.Tx) error {
+		var n int
+		if e := tx.QueryRow(`SELECT COUNT(*) FROM presets WHERE name = ?`, preset).Scan(&n); e != nil {
+			return e
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+
+		var d sql.NullString
+		if e := tx.QueryRow(`SELECT MAX(date) FROM routine_snapshots WHERE preset = ?`, preset).Scan(&d); e != nil {
+			return e
+		}
+		if !d.Valid {
+			return ErrNotFound
+		}
+		presetDate = d.String
+
+		// Check if the exercise exists in the latest snapshot
+		var cnt int
+		if e := tx.QueryRow(
+			`SELECT COUNT(*) FROM routine_snapshots WHERE id = ? AND preset = ? AND date = ?`,
+			exerciseID, preset, d.String).Scan(&cnt); e != nil {
+			return e
+		}
+		if cnt == 0 {
+			return ErrNotFound
+		}
+
+		set := ""
+		var args []any
+		add := func(frag string, v any) {
+			if set != "" {
+				set += ", "
+			}
+			set += frag
+			args = append(args, v)
+		}
+		if weight != nil {
+			add("weight = ?", *weight)
+		}
+		if reps != nil {
+			add("reps = ?", *reps)
+		}
+		if sets != nil {
+			add("sets = ?", *sets)
+		}
+		action = "updated"
+		if set == "" {
+			return nil
+		}
+		args = append(args, exerciseID)
+		_, e := tx.Exec(`UPDATE routine_snapshots SET `+set+` WHERE id = ?`, args...)
+		return e
 	})
 	return action, presetDate, err
 }

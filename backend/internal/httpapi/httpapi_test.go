@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -347,22 +348,37 @@ func TestPresetEndpoints(t *testing.T) {
 	}
 
 	// PATCH in-place: existing -> updated, same snapshot date
-	w = c.req("PATCH", "/api/presets/"+urlSeg("自重")+"/exercises/"+urlSeg("懸垂"), `{"reps":15}`)
+	// First get the exercise ID from the snapshot
+	w = c.req("GET", "/api/presets/"+urlSeg("自重"), "")
+	snapshot := decode(t, w)
+	exercises := snapshot["exercises"].([]any)
+	if len(exercises) == 0 {
+		t.Fatal("no exercises in snapshot")
+	}
+	firstExercise := exercises[0].(map[string]any)
+	exerciseID := int(firstExercise["id"].(float64))
+	
+	w = c.req("PATCH", "/api/presets/"+urlSeg("自重")+"/exercises/"+strconv.Itoa(exerciseID), `{"reps":15}`)
 	m = decode(t, w)
 	if w.Code != 200 || m["action"] != "updated" || m["preset"] != "自重" || m["presetDate"] != todayDate {
 		t.Fatalf("patch updated: %d (%v)", w.Code, m)
 	}
-	// PATCH missing -> added
-	w = c.req("PATCH", "/api/presets/"+urlSeg("自重")+"/exercises/"+urlSeg("新種目"), `{"reps":20}`)
-	if decode(t, w)["action"] != "added" {
-		t.Fatalf("patch added: %s", w.Body.String())
+	// PATCH missing exerciseID -> 404
+	w = c.req("PATCH", "/api/presets/"+urlSeg("自重")+"/exercises/99999", `{"reps":20}`)
+	if w.Code != 404 {
+		t.Fatalf("patch missing exercise: %d", w.Code)
 	}
-	// history unchanged by PATCH (still 2)
+	// POST new exercise
+	w = c.req("POST", "/api/presets/"+urlSeg("自重")+"/exercises", `{"name":"新種目","reps":20}`)
+	if decode(t, w)["action"] != "added" {
+		t.Fatalf("add exercise: %s", w.Body.String())
+	}
+	// history unchanged by PATCH/POST (still 2)
 	if h := decode(t, c.req("GET", "/api/presets/"+urlSeg("自重")+"/history", ""))["snapshots"].([]any); len(h) != 2 {
-		t.Fatalf("PATCH must not add history: %v", h)
+		t.Fatalf("PATCH/POST must not add history: %v", h)
 	}
 	// PATCH unknown preset -> 404
-	if w = c.req("PATCH", "/api/presets/"+urlSeg("未登録")+"/exercises/"+urlSeg("懸垂"), `{"reps":1}`); w.Code != 404 {
+	if w = c.req("PATCH", "/api/presets/"+urlSeg("未登録")+"/exercises/"+strconv.Itoa(exerciseID), `{"reps":1}`); w.Code != 404 {
 		t.Fatalf("patch unknown preset: %d", w.Code)
 	}
 
