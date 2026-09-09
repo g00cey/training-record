@@ -1,7 +1,7 @@
 # training-record — ローカル開発 / CI 相当タスク
 # ホスティング未定のため CI はこの Makefile をローカルで回す運用。
 
-.PHONY: help up dev down build logs lint test fmt clean
+.PHONY: help up dev down build logs lint test fmt clean db_backup
 
 help:
 	@echo "make up      - 本番相当構成で起動 (docker compose up --build -d)"
@@ -13,6 +13,7 @@ help:
 	@echo "make test    - go test ./..."
 	@echo "make fmt     - gofmt"
 	@echo "make clean   - down + training-data ボリューム削除（DB を初期化）"
+	@echo "make db_backup - DB バックアップを ./backups/ に作成"
 
 up:
 	docker compose up --build -d
@@ -41,3 +42,9 @@ fmt:
 
 clean:
 	docker compose down -v
+
+db_backup:
+	@mkdir -p backups
+	@BACKUP_FILE="backups/training_$$(date +%Y%m%d_%H%M%S).db"; \
+	docker compose cp backend:/data/training.db "$$BACKUP_FILE"; \
+	echo "バックアップを作成しました: $$BACKUP_FILE"
