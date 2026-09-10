@@ -14,8 +14,9 @@
 
 ## ステータス
 
-Phase 0〜5 実装済み（独立検証済み）。Phase 6（故障予防アドバイス・任意）は未着手。
-移行元資産は `skill/` 配下（不変）。Hermes 向け配布物は `hermes-skill/` 配下。
+Phase 0〜6 すべて Web アプリ側は実装・独立検証済み。
+移行元資産は `skill/` 配下（不変・2026-09-07 で凍結）。Hermes 向け配布物は `hermes-skill/` 配下。
+残りはカットオーバーの運用作業 → [hermes-integration.md](./hermes-integration.md)。
 
 ## 決定事項（2026-09-08 確認済み）
 

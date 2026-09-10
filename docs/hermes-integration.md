@@ -86,6 +86,28 @@ Hermes Agent の `training-tracker` スキルを、ローカル SQLite 直接操
 5. 旧スキル（`training_db.py`）を停止。以降ローカル `training.db` は更新されない。
 6. 以後、記録は Web UI と Hermes のどちらから行っても同じ backend DB に入る。
 
+## 移行の残作業チェックリスト（運用）
+
+Phase 0〜6 の Web アプリ実装は完了・検証済み。以下はカットオーバーを本番運用に乗せるための作業。
+
+### 必須
+- [ ] **Hermes 疎通の最終確認**: Hermes 実行環境から `training_api.py health` が 200。`TRAINING_API_BASE=http://172.16.1.30/api`
+- [ ] **旧スキルの停止確認**: Hermes 側で旧 `training_db.py` 系スキルが呼ばれないこと（二重記録防止）。旧ローカル `training.db` は凍結（2026-09-07 時点、backend の DB がこれと一致）
+- [ ] **エンドツーエンド確認**: Hermes からテスト記録 → Web UI（`http://172.16.1.30/`）に反映 → Web UI から削除 or 残す判断。`advice` / `summary` / `show-routine` が返る
+- [ ] **未記録データの投入**: 2026-09-08 以降に実施したトレーニングがあれば Web UI か Hermes で記録（移行元 `training.db` は 2026-09-07 で止まっている）
+- [ ] **常時起動**: `docker compose up -d`（`restart: unless-stopped` 設定済み）でデタッチ起動し、ホスト再起動後も自動復帰することを確認（Docker デーモンが常駐サービスであること）
+
+### 推奨
+- [ ] **API キーのローテーション**: 現行キーは設計・検証のログに平文で残っている。気になるなら
+  `sed -i "s/^API_KEY=.*/API_KEY=$(openssl rand -hex 32)/" .env` → `docker compose up -d` → Hermes の `TRAINING_API_KEY` も更新
+- [ ] **定期バックアップ**: `training-data` volume が唯一の正となるため、`make db_backup`（`./backups/` に `training.db` をコピー）を cron 等で定期実行。旧 `skill/.../training.db` はカットオーバー前のベースラインとして保管
+- [ ] **`.env` の控え**: `.env`（`API_KEY`）は git 管理外。ホスト障害時に必要なので別途安全な場所に保管
+
+### 任意 / 後回し可
+- [ ] TLS（自己署名）を張る場合は nginx に 443 サーバブロック追加 → [infrastructure.md](./infrastructure.md)
+- [ ] Phase 6 の Hermes 側 `advice` 組み込み（`SKILL.md` のアドバイス手順を `advice` 結果ベースに）→ 本ドキュメント「Phase 6」節
+- [ ] リポジトリ housekeeping: 中断退避用の `feature/multi-preset` ブランチ削除（`git branch -D feature/multi-preset`）
+
 ## ロールバック
 
 - Web アプリ稼働後に Hermes 経由で入れた記録は Web アプリの DB（`training-data` volume）にのみ存在する。
