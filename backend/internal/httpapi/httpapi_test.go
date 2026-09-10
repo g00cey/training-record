@@ -357,7 +357,7 @@ func TestPresetEndpoints(t *testing.T) {
 	}
 	firstExercise := exercises[0].(map[string]any)
 	exerciseID := int(firstExercise["id"].(float64))
-	
+
 	w = c.req("PATCH", "/api/presets/"+urlSeg("自重")+"/exercises/"+strconv.Itoa(exerciseID), `{"reps":15}`)
 	m = decode(t, w)
 	if w.Code != 200 || m["action"] != "updated" || m["preset"] != "自重" || m["presetDate"] != todayDate {
@@ -683,4 +683,147 @@ func urlSeg(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func TestAdviceEndpoint(t *testing.T) {
+	h, _ := testsupport.NewBootstrappedRouter(t, key)
+	c := &client{t: t, h: h}
+
+	// auth required
+	if code := c.do("GET", "/api/advice", "", false).Code; code != 401 {
+		t.Fatalf("no-auth code = %d, want 401", code)
+	}
+
+	w := c.req("GET", "/api/advice", "")
+	if w.Code != 200 {
+		t.Fatalf("advice code = %d (%s)", w.Code, w.Body.String())
+	}
+	m := decode(t, w)
+
+	if _, ok := m["asOf"].(string); !ok {
+		t.Fatalf("asOf not a string: %v", m["asOf"])
+	}
+
+	acwr, ok := m["acwr"].(map[string]any)
+	if !ok {
+		t.Fatalf("acwr not an object: %v", m["acwr"])
+	}
+	if _, ok := acwr["value"].(float64); !ok {
+		t.Errorf("acwr.value not a number: %v", acwr["value"])
+	}
+	if _, ok := acwr["zone"].(string); !ok {
+		t.Errorf("acwr.zone not a string: %v", acwr["zone"])
+	}
+	for _, k := range []string{"acute7d", "chronicWeekly"} {
+		f, ok := acwr[k].(float64)
+		if !ok || f != float64(int(f)) {
+			t.Errorf("acwr.%s not an integer: %v", k, acwr[k])
+		}
+	}
+
+	fr, ok := m["frequency"].(map[string]any)
+	if !ok {
+		t.Fatalf("frequency not an object: %v", m["frequency"])
+	}
+	if fr["windowDays"].(float64) != 14 {
+		t.Errorf("frequency.windowDays = %v, want 14", fr["windowDays"])
+	}
+	for _, k := range []string{"strengthSessions", "spinSessions", "total", "maxConsecutiveWithin24h"} {
+		if _, ok := fr[k].(float64); !ok {
+			t.Errorf("frequency.%s not a number: %v", k, fr[k])
+		}
+	}
+	if s, _ := fr["status"].(string); s != "good" && s != "low" && s != "rest_needed" && s != "long_off" {
+		t.Errorf("frequency.status invalid: %v", fr["status"])
+	}
+	if _, ok := fr["message"].(string); !ok {
+		t.Errorf("frequency.message not a string: %v", fr["message"])
+	}
+
+	po, ok := m["progressiveOverload"].(map[string]any)
+	if !ok {
+		t.Fatalf("progressiveOverload not an object: %v", m["progressiveOverload"])
+	}
+	if _, ok := po["weeklyVolumeChangePct"].(float64); !ok {
+		t.Errorf("progressiveOverload.weeklyVolumeChangePct not a number: %v", po["weeklyVolumeChangePct"])
+	}
+	if s, _ := po["status"].(string); s != "ok" && s != "caution" && s != "warning" {
+		t.Errorf("progressiveOverload.status invalid: %v", po["status"])
+	}
+	exList, ok := po["exercises"].([]any)
+	if !ok {
+		t.Fatalf("progressiveOverload.exercises not an array: %v", po["exercises"])
+	}
+	for _, e := range exList {
+		ex := e.(map[string]any)
+		for _, k := range []string{"name", "changePct", "status", "lastIncreasedOn"} {
+			if _, present := ex[k]; !present {
+				t.Errorf("overload exercise missing %q: %v", k, ex)
+			}
+		}
+		// prevWeight/latestWeight keys present (may be null)
+		if _, present := ex["prevWeight"]; !present {
+			t.Errorf("overload exercise missing prevWeight: %v", ex)
+		}
+	}
+
+	dl, ok := m["deload"].(map[string]any)
+	if !ok {
+		t.Fatalf("deload not an object: %v", m["deload"])
+	}
+	if _, ok := dl["due"].(bool); !ok {
+		t.Errorf("deload.due not a bool: %v", dl["due"])
+	}
+	if _, ok := dl["message"].(string); !ok {
+		t.Errorf("deload.message not a string: %v", dl["message"])
+	}
+	if _, present := dl["lastDeloadDate"]; !present {
+		t.Errorf("deload.lastDeloadDate key missing")
+	}
+	if _, present := dl["weeksSince"]; !present {
+		t.Errorf("deload.weeksSince key missing")
+	}
+
+	we, ok := m["watchExercises"].([]any)
+	if !ok {
+		t.Fatalf("watchExercises not an array: %v", m["watchExercises"])
+	}
+	for _, x := range we {
+		wx := x.(map[string]any)
+		if wx["reason"] != "weight_increased" {
+			t.Errorf("watch exercise reason = %v", wx["reason"])
+		}
+		for _, k := range []string{"name", "from", "to", "on", "formGuideAnchor"} {
+			if _, present := wx[k]; !present {
+				t.Errorf("watch exercise missing %q: %v", k, wx)
+			}
+		}
+	}
+
+	ws, ok := m["warningSigns"].(map[string]any)
+	if !ok {
+		t.Fatalf("warningSigns not an object: %v", m["warningSigns"])
+	}
+	fs, ok := ws["flaggedSessions"].([]any)
+	if !ok {
+		t.Fatalf("warningSigns.flaggedSessions not an array: %v", ws["flaggedSessions"])
+	}
+	for _, x := range fs {
+		f := x.(map[string]any)
+		if _, ok := f["date"].(string); !ok {
+			t.Errorf("flagged session date not a string: %v", f)
+		}
+		if _, ok := f["matched"].([]any); !ok {
+			t.Errorf("flagged session matched not an array: %v", f)
+		}
+		if _, ok := f["notes"].(string); !ok {
+			t.Errorf("flagged session notes not a string: %v", f)
+		}
+	}
+	if len(ws["stopNow"].([]any)) != 4 {
+		t.Errorf("warningSigns.stopNow len = %d, want 4", len(ws["stopNow"].([]any)))
+	}
+	if len(ws["monitor"].([]any)) != 4 {
+		t.Errorf("warningSigns.monitor len = %d, want 4", len(ws["monitor"].([]any)))
+	}
 }

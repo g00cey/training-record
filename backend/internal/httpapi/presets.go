@@ -236,10 +236,10 @@ func (h *Handlers) patchPresetExercise(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"action":      action,
-		"exerciseId":  exerciseID,
-		"preset":      name,
-		"presetDate":  presetDate,
+		"action":     action,
+		"exerciseId": exerciseID,
+		"preset":     name,
+		"presetDate": presetDate,
 	})
 	return nil
 }
@@ -271,11 +271,11 @@ func (h *Handlers) addPresetExercise(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"action":      "added",
-		"exerciseId":  exerciseID,
-		"exercise":    strings.TrimSpace(*b.Name),
-		"preset":      name,
-		"presetDate":  presetDate,
+		"action":     "added",
+		"exerciseId": exerciseID,
+		"exercise":   strings.TrimSpace(*b.Name),
+		"preset":     name,
+		"presetDate": presetDate,
 	})
 	return nil
 }

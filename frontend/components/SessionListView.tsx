@@ -12,6 +12,7 @@ import type {
 } from '@/lib/types';
 import { guessKind, KIND_BADGE_CLASS, KIND_LABEL } from '@/lib/domain';
 import { longLabel } from '@/lib/date';
+import { AdviceCard } from './AdviceCard';
 import {
   Button,
   Card,
@@ -125,6 +126,8 @@ export function SessionListView() {
           </Button>
         </div>
       </Card>
+
+      <AdviceCard compact />
 
       {error && <ErrorBox error={error} onRetry={retry} />}
       {loading && !error && <Spinner />}

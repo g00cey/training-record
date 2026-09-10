@@ -491,17 +491,75 @@ type LoadReport struct {
 	Recommendations        []string        `json:"recommendations"`
 }
 
-// LoadReport implements the legacy training_load_analysis.py report.
-func (s *Service) LoadReport() (*LoadReport, error) {
-	now := time.Now().In(domain.JST)
-	today := now.Format(domain.DateLayout)
-	day7 := now.AddDate(0, 0, -7).Format(domain.DateLayout)
-	day28 := now.AddDate(0, 0, -28).Format(domain.DateLayout)
+// loadMetrics holds the shared acute/chronic load figures used by both
+// GET /api/load-report and GET /api/advice.
+type loadMetrics struct {
+	today, day7, day28 string
+	profile            domain.Profile
+	strengths28        []domain.StrengthSession // date >= day28, ascending
+	spins28            []domain.SpinSession
+	acuteStrengthVL    float64
+	chronicStrengthVL  float64
+	acuteSpinTrimp     float64
+	chronicSpinTrimp   float64
+	acuteStrengthCount int
+	acuteSpinCount     int
+	acuteTotal         float64 // acuteStrengthVL + acuteSpinTrimp
+	chronicWeekly      float64 // (chronicStrengthVL + chronicSpinTrimp) / 4
+	acwr               float64
+	zone               string
+}
 
+// computeLoadMetricsFrom derives the load figures from already-fetched
+// session slices (ascending by date). Sessions outside the 28-day window
+// are ignored, so callers may pass full history.
+func computeLoadMetricsFrom(now time.Time, prof domain.Profile, strengths []domain.StrengthSession, spins []domain.SpinSession) *loadMetrics {
+	m := &loadMetrics{
+		today:   now.Format(domain.DateLayout),
+		day7:    now.AddDate(0, 0, -7).Format(domain.DateLayout),
+		day28:   now.AddDate(0, 0, -28).Format(domain.DateLayout),
+		profile: prof,
+	}
+	for _, ss := range strengths {
+		if ss.Date < m.day28 {
+			continue
+		}
+		m.strengths28 = append(m.strengths28, ss)
+		vl := domain.SessionVolumeLoad(ss.Exercises, prof.BodyweightKg)
+		m.chronicStrengthVL += vl
+		if ss.Date >= m.day7 {
+			m.acuteStrengthVL += vl
+			m.acuteStrengthCount++
+		}
+	}
+	for _, sp := range spins {
+		if sp.Date < m.day28 {
+			continue
+		}
+		m.spins28 = append(m.spins28, sp)
+		t := domain.TRIMP(sp.DurationMinutes, sp.AvgHeartRate, prof.MaxHrEst)
+		m.chronicSpinTrimp += t
+		if sp.Date >= m.day7 {
+			m.acuteSpinTrimp += t
+			m.acuteSpinCount++
+		}
+	}
+	m.acuteTotal = m.acuteStrengthVL + m.acuteSpinTrimp
+	m.chronicWeekly = (m.chronicStrengthVL + m.chronicSpinTrimp) / 4
+	if m.chronicWeekly > 0 {
+		m.acwr = domain.Round2(m.acuteTotal / m.chronicWeekly)
+	}
+	m.zone = domain.ACWRZone(m.acwr)
+	return m
+}
+
+// computeLoadMetrics fetches the 28-day window and derives the load figures.
+func (s *Service) computeLoadMetrics(now time.Time) (*loadMetrics, error) {
 	prof, err := s.st.GetProfile()
 	if err != nil {
 		return nil, err
 	}
+	day28 := now.AddDate(0, 0, -28).Format(domain.DateLayout)
 	strengths, err := s.st.StrengthSessionsInRange(day28, "")
 	if err != nil {
 		return nil, err
@@ -510,68 +568,43 @@ func (s *Service) LoadReport() (*LoadReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	return computeLoadMetricsFrom(now, prof, strengths, spins), nil
+}
 
-	type svl struct {
-		date string
-		vl   float64
+// LoadReport implements the legacy training_load_analysis.py report.
+func (s *Service) LoadReport() (*LoadReport, error) {
+	m, err := s.computeLoadMetrics(time.Now().In(domain.JST))
+	if err != nil {
+		return nil, err
 	}
-	var sVLs []svl
-	var acuteStrengthVL, chronicStrengthVL float64
-	acuteStrengthCount := 0
-	for _, ss := range strengths {
-		vl := domain.SessionVolumeLoad(ss.Exercises, prof.BodyweightKg)
-		sVLs = append(sVLs, svl{ss.Date, vl})
-		chronicStrengthVL += vl
-		if ss.Date >= day7 {
-			acuteStrengthVL += vl
-			acuteStrengthCount++
-		}
-	}
-
-	var acuteSpinTrimp, chronicSpinTrimp float64
-	acuteSpinCount := 0
-	for _, sp := range spins {
-		t := domain.TRIMP(sp.DurationMinutes, sp.AvgHeartRate, prof.MaxHrEst)
-		chronicSpinTrimp += t
-		if sp.Date >= day7 {
-			acuteSpinTrimp += t
-			acuteSpinCount++
-		}
-	}
-
-	acuteTotal := acuteStrengthVL + acuteSpinTrimp
-	chronicWeekly := (chronicStrengthVL + chronicSpinTrimp) / 4
-	acwr := 0.0
-	if chronicWeekly > 0 {
-		acwr = domain.Round2(acuteTotal / chronicWeekly)
-	}
+	prof := m.profile
 
 	rep := &LoadReport{
-		AsOf: today,
+		AsOf: m.today,
 		Profile: LoadProfile{
 			BodyweightKg: prof.BodyweightKg,
 			HeightCm:     prof.HeightCm,
 			Bmi:          domain.Round1(prof.BodyweightKg / ((prof.HeightCm / 100) * (prof.HeightCm / 100))),
 		},
 		Acute7d: LoadAcute{
-			StrengthSessions: acuteStrengthCount,
-			SpinSessions:     acuteSpinCount,
-			VolumeLoad:       domain.RoundInt(acuteStrengthVL),
-			SpinTrimp:        domain.Round1(acuteSpinTrimp),
-			Total:            domain.RoundInt(acuteTotal),
-			VolumeLoadPerBw:  domain.Round1(acuteStrengthVL / prof.BodyweightKg),
+			StrengthSessions: m.acuteStrengthCount,
+			SpinSessions:     m.acuteSpinCount,
+			VolumeLoad:       domain.RoundInt(m.acuteStrengthVL),
+			SpinTrimp:        domain.Round1(m.acuteSpinTrimp),
+			Total:            domain.RoundInt(m.acuteTotal),
+			VolumeLoadPerBw:  domain.Round1(m.acuteStrengthVL / prof.BodyweightKg),
 		},
 		Chronic28d: LoadChronic{
-			StrengthSessions: len(strengths),
-			WeeklyVolumeLoad: domain.RoundInt(chronicStrengthVL / 4),
+			StrengthSessions: len(m.strengths28),
+			WeeklyVolumeLoad: domain.RoundInt(m.chronicStrengthVL / 4),
 		},
-		ACWR:                   acwr,
-		Zone:                   domain.ACWRZone(acwr),
+		ACWR:                   m.acwr,
+		Zone:                   m.zone,
 		LatestSessionBreakdown: []LoadBreakdown{},
 	}
 
-	if len(strengths) > 0 {
-		latest := strengths[len(strengths)-1]
+	if len(m.strengths28) > 0 {
+		latest := m.strengths28[len(m.strengths28)-1]
 		bd := make([]LoadBreakdown, 0, len(latest.Exercises))
 		for _, e := range latest.Exercises {
 			bd = append(bd, LoadBreakdown{
@@ -586,11 +619,11 @@ func (s *Service) LoadReport() (*LoadReport, error) {
 
 	var rec []string
 	switch {
-	case acwr > 1.5:
+	case m.acwr > 1.5:
 		rec = append(rec, "今週は負荷を40%減らすデロードを推奨")
-	case acwr > 1.3:
+	case m.acwr > 1.3:
 		rec = append(rec, "負荷増加は控えめに。2-3種目ずつローテーションで")
-	case acwr < 0.6:
+	case m.acwr < 0.6:
 		rec = append(rec, "もう少し負荷を上げる余地があります")
 	default:
 		rec = append(rec, "現状のペースを維持してください")

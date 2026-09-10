@@ -209,3 +209,68 @@ export type LastSession = {
   strength: StrengthSession | null;
   spin: SpinSession | null;
 };
+
+// --- 故障予防アドバイス（GET /api/advice・Phase 6） ---
+
+export type FrequencyStatus = 'good' | 'low' | 'rest_needed' | 'long_off';
+export type OverloadStatus = 'ok' | 'caution' | 'warning';
+
+export type AdviceOverloadExercise = {
+  name: string;
+  prevWeight: number | null;
+  latestWeight: number | null;
+  changePct: number | null;
+  status: OverloadStatus;
+  lastIncreasedOn?: string | null;
+};
+
+export type AdviceWatchExercise = {
+  name: string;
+  reason: string;
+  from: number | null;
+  to: number | null;
+  on: string | null;
+  formGuideAnchor?: string;
+};
+
+export type AdviceFlaggedSession = {
+  date: string;
+  matched: string[];
+  notes: string;
+};
+
+export type Advice = {
+  asOf: string;
+  acwr: {
+    value: number;
+    zone: LoadReportZone;
+    acute7d: number;
+    chronicWeekly: number;
+  };
+  frequency: {
+    windowDays: number;
+    strengthSessions: number;
+    spinSessions: number;
+    total: number;
+    maxConsecutiveWithin24h: number;
+    status: FrequencyStatus;
+    message: string;
+  };
+  progressiveOverload: {
+    weeklyVolumeChangePct: number | null;
+    status: OverloadStatus;
+    exercises: AdviceOverloadExercise[];
+  };
+  deload: {
+    lastDeloadDate: string | null;
+    weeksSince: number | null;
+    due: boolean;
+    message: string;
+  };
+  watchExercises: AdviceWatchExercise[];
+  warningSigns: {
+    flaggedSessions: AdviceFlaggedSession[];
+    stopNow: string[];
+    monitor: string[];
+  };
+};

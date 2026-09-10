@@ -76,6 +76,7 @@ func NewRouter(svc *service.Service, apiKey string) http.Handler {
 	mux.HandleFunc("GET /api/summary", handle(h.summary))
 	mux.HandleFunc("GET /api/summary/weekly", handle(h.weeklySummary))
 	mux.HandleFunc("GET /api/load-report", handle(h.loadReport))
+	mux.HandleFunc("GET /api/advice", handle(h.advice))
 	mux.HandleFunc("GET /api/sessions/last", handle(h.lastSessions))
 	mux.HandleFunc("GET /api/history", handle(h.history))
 

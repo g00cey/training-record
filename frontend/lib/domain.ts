@@ -1,6 +1,11 @@
 // ドメイン表現（docs/domain.md 準拠）。
 
-import type { LoadReportZone, SessionKind } from './types';
+import type {
+  FrequencyStatus,
+  LoadReportZone,
+  OverloadStatus,
+  SessionKind,
+} from './types';
 
 // --- 記録区分（notes プリセット） --------------------------------------------
 
@@ -52,6 +57,53 @@ export const ZONE_COLOR: Record<LoadReportZone, string> = {
   slightly_low: '#3b82f6',
   no_data: '#9ca3af',
 };
+
+/** ACWR ゾーンのバッジ用 Tailwind クラス（domain.md の色分け）。 */
+export const ZONE_BADGE_CLASS: Record<LoadReportZone, string> = {
+  safe: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  caution: 'bg-amber-100 text-amber-800 border-amber-200',
+  warning: 'bg-red-100 text-red-800 border-red-200',
+  low: 'bg-gray-100 text-gray-700 border-gray-200',
+  slightly_low: 'bg-gray-100 text-gray-700 border-gray-200',
+  no_data: 'bg-gray-50 text-gray-500 border-gray-200',
+};
+
+// --- 故障予防アドバイス（Phase 6） ----------------------------------------
+
+export const FREQ_STATUS: Record<
+  FrequencyStatus,
+  { label: string; cls: string }
+> = {
+  good: { label: '良好', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  low: { label: '頻度不足', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  rest_needed: {
+    label: '休息不足',
+    cls: 'bg-red-100 text-red-800 border-red-200',
+  },
+  long_off: {
+    label: '長期オフ',
+    cls: 'bg-gray-100 text-gray-700 border-gray-200',
+  },
+};
+
+export const OVERLOAD_STATUS: Record<
+  OverloadStatus,
+  { label: string; cls: string }
+> = {
+  ok: { label: '適正', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  caution: {
+    label: 'やや過剰',
+    cls: 'bg-amber-100 text-amber-800 border-amber-200',
+  },
+  warning: { label: '過剰', cls: 'bg-red-100 text-red-800 border-red-200' },
+};
+
+/** ±つきパーセント表示。null は "—"。 */
+export function formatPct(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(1)}%`;
+}
 
 // --- 心拍ゾーン内訳（スピン notes の慣習フォーマット） ----------------------
 // 例: 心拍ゾーン内訳: ウォームアップ7:25/インテンシブ9:04/有酸素6:48/無酸素12:05/最大酸素摂取量(高負荷)4:42

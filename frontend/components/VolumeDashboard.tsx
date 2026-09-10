@@ -14,6 +14,7 @@ import type {
   WeeklySummary,
 } from '@/lib/types';
 import { AcwrGauge } from './AcwrGauge';
+import { AdviceCard } from './AdviceCard';
 import {
   Card,
   EmptyState,
@@ -279,6 +280,8 @@ export function VolumeDashboard() {
           )}
         </Card>
       </div>
+
+      <AdviceCard />
     </div>
   );
 }
