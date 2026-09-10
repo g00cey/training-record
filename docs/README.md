@@ -14,9 +14,9 @@
 
 ## ステータス
 
-Phase 0〜6 すべて Web アプリ側は実装・独立検証済み。
-移行元資産は `skill/` 配下（不変・2026-09-07 で凍結）。Hermes 向け配布物は `hermes-skill/` 配下。
-残りはカットオーバーの運用作業 → [hermes-integration.md](./hermes-integration.md)。
+**移行完了（2026-09-10）**。Phase 0〜6 実装・独立検証済み。Hermes は API 版スキル（v2）に切り替え済み、
+旧 `training_db.py` 系は停止。移行元資産 `skill/` は 2026-09-07 で凍結（backend の DB と一致）。
+Hermes 向け配布物は `hermes-skill/`。カットオーバーの記録 → [hermes-integration.md](./hermes-integration.md)。
 
 ## 決定事項（2026-09-08 確認済み）
 
