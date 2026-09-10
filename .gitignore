@@ -40,3 +40,6 @@ Thumbs.db
 # --- python ---
 __pycache__/
 *.pyc
+
+# --- 配布物（ソースから再生成可）---
+*.zip

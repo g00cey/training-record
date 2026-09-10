@@ -12,6 +12,18 @@ hermes-skill/training-tracker/
     └── split-routine-analysis.md # 旧 skill から複製（不変）
 ```
 
+## 配布用 zip の作成
+
+`zip` コマンドが無い環境でも作れる:
+
+```bash
+cd hermes-skill && python3 -m zipfile -c ../training-tracker-skill-v2.0.0.zip training-tracker
+```
+
+zip 内は `training-tracker/` がトップレベルなので、Hermes のスキルディレクトリで
+そのまま展開すれば `training-tracker/SKILL.md` 等が配置される。
+（zip 自体はソースから再生成できるので git 管理外）
+
 ## デプロイ手順（Hermes 環境側）
 
 1. `training-tracker/` を Hermes のスキルディレクトリに配置
