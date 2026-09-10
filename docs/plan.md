@@ -97,7 +97,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: Hermes Agent が API 経由で記録・参照・プリセット更新を完結できる（`training_api.py` を稼働中スタックで疎通確認済み）
 
-### Phase 6 — 故障予防アドバイス（任意）
+### Phase 6 — 故障予防アドバイス（任意）✅ Web アプリ側 実装済み（Hermes 側 `advice` サブコマンドは依頼中）
 - backend: `GET /api/advice` — プログレッシブオーバーロード（週間VL比 + 種目別前回比）/ 頻度チェック（直近14日）/
   デロード自動判定（週間VLが直近4週平均の55%以下）/ 要チェック6種目の増量検知 / 警告サイン（notes パース）を集約。
   `service` 層に判定を集約、Web UI と Hermes `advice` サブコマンドで共用。→ [api.md](./api.md) / [domain.md](./domain.md)

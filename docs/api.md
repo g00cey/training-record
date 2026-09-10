@@ -358,9 +358,18 @@ GET /api/advice
 ```
 
 **判定の既定（`docs/domain.md` 参照）**:
-- 痛み・違和感は `strength_sessions.notes` をキーワード（`痛`, `違和感`, `しびれ`, `ロッキング`, `肉離れ`, `張り` 等）でパース。直近 28 日を対象
+- 痛み・違和感は `strength_sessions.notes` をキーワード（`痛`, `違和感`, `しびれ`, `痺れ`, `ロッキング`, `肉離れ`, `張り`）で**単純部分一致**。直近 28 日。`違和感なし` も `matched:["違和感"]` になる（曖昧判定は Hermes / UI 側に委譲）
 - デロード週は自動判定（週間 Volume Load が直近 4 週平均の 55% 以下）。専用フラグは持たない
 - プログレッシブオーバーロードは「週間総ボリューム比」と「種目別の前回実績比」の両方を返す
+
+**実装で確定した挙動（Phase 6 初回実装）**:
+- **デロード判定と `weeklyVolumeChangePct` の週間 Volume Load は筋トレのみ**（`GET /api/volume?granularity=week` と同じ。TRIMP を含めない）。`acwr.acute7d` / `chronicWeekly` は `load-report` 同様 TRIMP を含む
+- `frequency.status` の `good` は「何も引っかからない＝適正」バケット（厳密に合計 7 以上とは限らない）。優先度 `long_off > rest_needed > low > good`
+- 種目別 `status` は `>10%` で `caution`、`>15%` または短期連続増で `warning`。`progressiveOverload.status` は「週間バンドの status」と「各種目 status」の最悪値
+- 「短期連続増」= その種目の前回実績自体が更にその前より増量、かつ直近セッションから 7 日以内
+- `weeklyVolumeChangePct` は前 7 日ウィンドウが空なら `0`
+- `watchExercises` / の対象は 7 断片（`ショルダープレス` `サイドレイズ` `ディップス` `スカルクラッシャー` `懸垂` `ダンベルデッドリフト` `フロントラックスクワット`）の部分一致。`ダンベルサイドレイズ` 等の複合名も拾う
+- 配列（`progressiveOverload.exercises` / `watchExercises` / `warningSigns.flaggedSessions`）は常に `[]`（`null` にしない）。全トップレベルキー常時存在
 
 Hermes 側はこの JSON ＋ `references/exercise-form-guide.md` から自然文アドバイスを構成する（→ [hermes-integration.md](./hermes-integration.md) Phase 6）。
 
