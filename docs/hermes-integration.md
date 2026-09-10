@@ -91,7 +91,7 @@ Hermes Agent の `training-tracker` スキルを、ローカル SQLite 直接操
 Phase 0〜6 の Web アプリ実装は完了・検証済み。カットオーバーも下記のとおり完了。
 
 ### 必須
-- [x] **Hermes 疎通の最終確認**: Hermes 実行環境から `training_api.py health` 200 確認済み（`TRAINING_API_BASE=http://172.16.1.30/api`）
+- [x] **Hermes 疎通の最終確認**: Hermes 実行環境から `training_api.py health` 200 確認済み（`TRAINING_API_BASE=http://<LAN内のホスト>/api`）
 - [x] **旧スキルの停止確認**: Hermes 側で旧 `training_db.py` 系は一切呼ばれていない。旧ローカル `training.db` は凍結（2026-09-07 時点、backend の DB がこれと一致）
 - [x] **未記録データの投入**: 未記録データなし。既に Web UI からデータ投入済み
 - [x] **常時起動**: `docker compose up -d`（`restart: unless-stopped`）で常時稼働・ホスト再起動後も自動復帰
