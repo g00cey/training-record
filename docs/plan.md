@@ -98,10 +98,15 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 **完了条件**: Hermes Agent が API 経由で記録・参照・プリセット更新を完結できる（`training_api.py` を稼働中スタックで疎通確認済み）
 
 ### Phase 6 — 故障予防アドバイス（任意）
-- プログレッシブオーバーロード 10% チェック、頻度チェック、警告サイン
-- デロード週リマインド
-- 要チェック種目の重量増時に注意表示
+- backend: `GET /api/advice` — プログレッシブオーバーロード（週間VL比 + 種目別前回比）/ 頻度チェック（直近14日）/
+  デロード自動判定（週間VLが直近4週平均の55%以下）/ 要チェック6種目の増量検知 / 警告サイン（notes パース）を集約。
+  `service` 層に判定を集約、Web UI と Hermes `advice` サブコマンドで共用。→ [api.md](./api.md) / [domain.md](./domain.md)
+- frontend: アドバイスカード（ダッシュボード / ボリューム画面。ACWR ゲージの近く）。
+  ACWR ゾーン・頻度ステータス・過負荷ステータス・デロード due バナー・要チェック種目・警告サイン flag を表示
+- hermes-skill: `training_api.py` に `advice` サブコマンド（薄いラッパ）。SKILL.md のアドバイス手順を `advice` 結果ベースに
+- 判定の既定: 痛み=notes パース / デロード=自動判定（専用フラグなし）/ 過負荷=週間比と種目別比の両方
 - 出典: `SKILL.md` 故障予防アドバイス節、`references/`
+- Hermes 側への依頼文 → [hermes-integration.md](./hermes-integration.md) Phase 6
 
 ## 依存関係
 

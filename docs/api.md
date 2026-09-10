@@ -43,6 +43,7 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 | `update-exercise` | `PATCH /api/presets/{name}/exercises/{exName}` |
 | `get-exercise-list` | `GET /api/exercises` |
 | （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
+| （新規・Phase 6） | `GET /api/advice`（skill: `advice`） |
 
 ---
 
@@ -312,6 +313,56 @@ GET /api/load-report
 GET /api/sessions/last
 → 200 { "strength": StrengthSession | null, "spin": SpinSession | null }
 ```
+
+### 故障予防アドバイス（Phase 6）
+
+`SKILL.md`「故障予防アドバイス」節と `docs/domain.md` の判定ルールを集約。Web UI のアドバイスカード・Hermes の `advice` サブコマンド共用。
+
+```
+GET /api/advice
+→ 200
+{
+  "asOf": "2026-09-10",
+  "acwr": { "value": 1.05, "zone": "safe", "acute7d": 180000, "chronicWeekly": 172000 },
+  "frequency": {
+    "windowDays": 14,
+    "strengthSessions": 8, "spinSessions": 0, "total": 8,
+    "maxConsecutiveWithin24h": 2,
+    "status": "good",          // good(合計≥7) | low(筋トレ<3) | rest_needed(24h未満連続あり) | long_off(直近14日ゼロ)
+    "message": "直近2週で8回。良好"
+  },
+  "progressiveOverload": {
+    "weeklyVolumeChangePct": 6.2,                                // 直近7日 vs その前7日の総 Volume Load
+    "status": "ok",           // ok(≤10%) | caution(>10%) | warning(>15% または同一種目の短期連続増)
+    "exercises": [
+      { "name": "ヒップストラスト", "prevWeight": 38, "latestWeight": 40,
+        "changePct": 5.3, "status": "ok", "lastIncreasedOn": "2026-09-07" }
+    ]     // 直近セッションで重量が前回実績より増えた種目のみ
+  },
+  "deload": {
+    "lastDeloadDate": "2026-08-05" | null,   // 自動判定: 週間VLが直近4週平均の55%以下の週
+    "weeksSince": 5 | null,
+    "due": true,             // weeksSince が null または ≥5
+    "message": "5週間デロードなし。今週ボリュームを40–50%落とすことを検討"
+  },
+  "watchExercises": [        // 固定6種目（ショルダープレス/サイドレイズ/ディップス/スカルクラッシャー/懸垂/ダンベルデッドリフト/フロントラックスクワット）
+    { "name": "ショルダープレス", "reason": "weight_increased",
+      "from": 22, "to": 25, "on": "2026-09-09", "formGuideAnchor": "ショルダープレス" }
+  ],
+  "warningSigns": {
+    "flaggedSessions": [ { "date": "2026-09-06", "matched": ["違和感"], "notes": "…肩に違和感…" } ],
+    "stopNow": [ "鋭い/刺す痛み（特に片側）", "関節の引っかかり・ロッキング感", "めまい・吐き気・胸の痛み", "筋肉の『プチッ』（肉離れの疑い）" ],
+    "monitor": [ "同じ部位の違和感が2週間以上", "トレーニング中だけ出る痛み", "日常生活に支障", "翌日に痛みが強くなる" ]
+  }
+}
+```
+
+**判定の既定（`docs/domain.md` 参照）**:
+- 痛み・違和感は `strength_sessions.notes` をキーワード（`痛`, `違和感`, `しびれ`, `ロッキング`, `肉離れ`, `張り` 等）でパース。直近 28 日を対象
+- デロード週は自動判定（週間 Volume Load が直近 4 週平均の 55% 以下）。専用フラグは持たない
+- プログレッシブオーバーロードは「週間総ボリューム比」と「種目別の前回実績比」の両方を返す
+
+Hermes 側はこの JSON ＋ `references/exercise-form-guide.md` から自然文アドバイスを構成する（→ [hermes-integration.md](./hermes-integration.md) Phase 6）。
 
 ---
 

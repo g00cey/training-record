@@ -98,4 +98,80 @@ Hermes Agent の `training-tracker` スキルを、ローカル SQLite 直接操
 - `TRAINING_API_KEY` は静的キー。LAN 内前提の軽い防御。ブラウザ／外部には出さない。
 - Hermes の実行環境から LAN の nginx に到達できること（別ネットワークなら VPN / ポートフォワード等が必要）。
 - `training_api.py` は Python 標準ライブラリのみ（`urllib`）。追加パッケージ不要。
+
+---
+
+## Phase 6（故障予防アドバイス）— Hermes 側への依頼
+
+Phase 6 では backend に `GET /api/advice`（判定の集約）を追加し、Hermes 側は
+`training_api.py` に `advice` サブコマンドを足して、その結果 + `references/` から
+自然文アドバイスを構成する。**Hermes が実装するのはサブコマンドとワークフローのみ**。
+
+### 依存関係
+
+- `GET /api/advice` は backend 側で実装する（未実装）。データモデルの決定 3 点
+  （痛み・違和感フィールド / デロード週の特定 / 過負荷の基準）が固まると
+  レスポンスの一部項目が変わり得るが、`advice` サブコマンドは JSON をそのまま
+  透過するだけなので**契約非依存**。先に追加して問題ない。
+
+### Hermes Agent に送る依頼（そのまま貼れる文面）
+
+> **依頼: `training-tracker` スキルに `advice` サブコマンドを追加してください（Phase 6）**
+>
+> 故障予防アドバイス用に、backend へ `GET /api/advice` エンドポイントを追加します
+> （判定ロジックはサーバ側。Web UI と共用）。Hermes 側では次を実施してください。
+>
+> **1. `scripts/training_api.py` にサブコマンドを追加**
+> `load-report` と同じ薄いラッパです。3 か所に追記:
+> ```python
+> # ハンドラ（cmd_load_report の隣）
+> def cmd_advice(a):
+>     _print(_request("GET", "/advice"))
+>
+> # パーサ登録（sub.add_parser("load-report") の隣）
+> sub.add_parser("advice")
+>
+> # handlers dict（"load-report": cmd_load_report, の隣）
+> "advice": cmd_advice,
+> ```
+> 使い方: `python3 <スキルパス>/scripts/training_api.py advice`
+>
+> **2. `GET /api/advice` のレスポンス形（backend が返すもの）**
+> ```json
+> {
+>   "asOf": "2026-09-10",
+>   "acwr": { "value": 1.05, "zone": "safe", "acute7d": 180000, "chronicWeekly": 172000 },
+>   "frequency": { "windowDays": 14, "strengthSessions": 8, "spinSessions": 0, "total": 8,
+>                  "maxConsecutiveWithin24h": 2,
+>                  "status": "good", "message": "..." },   // good | low | rest_needed | long_off
+>   "progressiveOverload": { "weeklyVolumeChangePct": 6.2, "status": "ok",   // ok | caution | warning
+>       "exercises": [ { "name": "ヒップストラスト", "prevWeight": 38, "latestWeight": 40,
+>                        "changePct": 5.3, "status": "ok", "lastIncreasedOn": "2026-09-07" } ] },
+>   "deload": { "lastDeloadDate": "2026-08-05", "weeksSince": 5, "due": true, "message": "..." },
+>   "watchExercises": [ { "name": "ショルダープレス", "reason": "weight_increased",
+>                         "from": 22, "to": 25, "on": "2026-09-09", "formGuideAnchor": "ショルダープレス" } ],
+>   "warningSigns": { "flaggedSessions": [ { "date": "2026-09-06", "matched": ["違和感"], "notes": "..." } ],
+>                     "stopNow": [ "..." ], "monitor": [ "..." ] }
+> }
+> ```
+>
+> **3. ワークフローへの組み込み（`SKILL.md`）**
+> - 「筋トレ記録」の最後（Step 4 / 故障予防アドバイス）を、`advice` の結果を根拠に
+>   **具体的な数値・種目名を挙げて**話す手順に差し替え。
+> - `progressiveOverload.status` が `caution`/`warning`、`acwr.zone` が `caution`/`warning`、
+>   `deload.due` が true、`frequency.status` が `rest_needed`/`long_off` のときは明確に警告。
+> - `watchExercises` に該当があれば `references/exercise-form-guide.md` の該当種目の行を引用。
+> - `warningSigns.flaggedSessions` があれば「即中止すべき」「経過観察」のリストを提示。
+> - 非同期チャットなので簡潔に。「ただ気をつけて」ではなく数字で。
+>
+> **4. 動作確認**
+> ```bash
+> python3 <スキルパス>/scripts/training_api.py advice
+> # → 上記の JSON。http_status 404 なら backend 側が未デプロイ
+> ```
+>
+> **5. 完了報告**: サブコマンド追加と、`SKILL.md` のワークフロー更新箇所を教えてください。
+>
+> ※ `GET /api/advice` の一部項目（`deload` の判定方法、`warningSigns` の拾い方など）は
+> データモデルの決定次第で変わる可能性があります。決まり次第この文面を更新します。
 </content>
