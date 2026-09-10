@@ -40,7 +40,7 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 | `weekly-summary` | `GET /api/summary/weekly` |
 | `get-routine` / `show-routine` | `GET /api/presets` / `GET /api/presets/{name}`（旧 `GET /api/routine` は結合ビューとして残置） |
 | `update-routine` | `PUT /api/presets/{name}` |
-| `update-exercise` | `PATCH /api/presets/{name}/exercises/{exName}` |
+| `update-exercise` | `PATCH /api/presets/{name}/exercises/{exerciseId}`（種目名ではなく `routine_snapshots.id`。追加は `POST /api/presets/{name}/exercises`） |
 | `get-exercise-list` | `GET /api/exercises` |
 | （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
 | （新規・Phase 6） | `GET /api/advice`（skill: `advice`） |
@@ -340,10 +340,10 @@ GET /api/advice
     ]     // 直近セッションで重量が前回実績より増えた種目のみ
   },
   "deload": {
-    "lastDeloadDate": "2026-08-05" | null,   // 自動判定: 週間VLが直近4週平均の55%以下の週
-    "weeksSince": 5 | null,
+    "lastDeloadDate": "2026-07-27" | null,   // 自動判定: 週間VLが直近4週平均の55%以下の週（月曜起点）。進行中の週は対象外
+    "weeksSince": 6 | null,
     "due": true,             // weeksSince が null または ≥5
-    "message": "5週間デロードなし。今週ボリュームを40–50%落とすことを検討"
+    "message": "前回デロードから6週間。今週ボリュームを40〜50%落とすデロードを検討"   // 文言は固定契約ではない
   },
   "watchExercises": [        // 固定6種目（ショルダープレス/サイドレイズ/ディップス/スカルクラッシャー/懸垂/ダンベルデッドリフト/フロントラックスクワット）
     { "name": "ショルダープレス", "reason": "weight_increased",
