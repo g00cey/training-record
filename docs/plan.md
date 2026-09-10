@@ -2,6 +2,9 @@
 
 Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / `nginx` の 3 サービス Web アプリに移行する。
 
+> **状況（2026-09-10）: Phase 0〜6 実装・独立検証・移行すべて完了。** 以下は経緯の記録。
+> 運用カットオーバーの記録は [hermes-integration.md](./hermes-integration.md)。
+
 ## ゴール
 
 - 現行スキルの記録・ルーティン・集計機能を Web UI で操作できる
@@ -22,7 +25,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 ## フェーズ分割
 
-### Phase 0 — 足場
+### Phase 0 — 足場 ✅ 実装済み・検証済み
 - `git init`（ローカルのみ）+ `.gitignore`
 - リポジトリレイアウト作成（`frontend/` `backend/` `nginx/` `compose.yaml` `compose.dev.yaml` `.env.example` `Makefile`）
 - backend: `net/http` サーバ + `GET /api/health`（Go module パスは仮に `training-record`）
@@ -33,7 +36,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: ブラウザで nginx 経由 frontend が開き、`/api/health` が返る
 
-### Phase 1 — backend コア（データ層 + 記録 API）
+### Phase 1 — backend コア（データ層 + 記録 API） ✅ 実装済み・検証済み
 - マイグレーションランナー（`embed` SQL + `schema_migrations`）
 - スキーマ `0001_init.sql`（4 テーブル + `profile` + インデックス）→ [data-model.md](./data-model.md)
 - 初回ブートストラップ: `BOOTSTRAP_DB_PATH` から既存 `training.db` を取り込み
@@ -45,7 +48,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: `curl` で記録の作成・取得・更新・削除ができ、既存 36 セッションが移行済み
 
-### Phase 2 — frontend コア（一覧 + 記録フォーム + ルーティン）
+### Phase 2 — frontend コア（一覧 + 記録フォーム + ルーティン） ✅ 実装済み・検証済み
 - API クライアント（`fetch` ラッパ + SWR）、SSR は `INTERNAL_API_BASE`
 - 一覧画面（セッション日付降順、種目・重量・回数・notes）
 - 記録の新規作成 / 編集フォーム（動的種目行、自重トグル、追記モード、種目名オートコンプリート）
@@ -56,14 +59,14 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: UI だけで 1 日分のトレーニングを記録・修正・削除でき、ルーティンを更新できる
 
-### Phase 3 — カレンダー表示
+### Phase 3 — カレンダー表示 ✅ 実装済み・検証済み
 - API: `GET /api/calendar?month=YYYY-MM`（`notes` から `kind` 判定、日別 Volume Load）
 - frontend: 月グリッド、種別バッジ（自重のみ / 自重＋FW / スピン）、日クリックで詳細
 - 前月/翌月ナビ、当月ハイライト
 
 **完了条件**: カレンダーで実施日と種別が一目でわかり、日付から記録詳細に飛べる
 
-### Phase 4 — ボリュームグラフ + 集計
+### Phase 4 — ボリュームグラフ + 集計 ✅ 実装済み・検証済み
 - service 層に Volume Load / TRIMP / ACWR を移植（`training_load_analysis.py`）→ [domain.md](./domain.md)
 - API: `GET /api/volume`（session / week / 種目別）, `GET /api/summary`, `GET /api/summary/weekly`, `GET /api/load-report`
 - API: `GET/PUT /api/profile`
@@ -72,7 +75,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: ボリューム推移が可視化され、体重設定が結果に反映される
 
-### Phase 2.5 — プリセットの複数化（追加要件）
+### Phase 2.5 — プリセットの複数化（追加要件） ✅ 実装済み・検証済み
 
 単一ルーティンを名前付き複数プリセットに拡張。記録フォームで複数プリセットを加算的に選択できる。
 
@@ -97,7 +100,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: Hermes Agent が API 経由で記録・参照・プリセット更新を完結できる（`training_api.py` を稼働中スタックで疎通確認済み）
 
-### Phase 6 — 故障予防アドバイス（任意）✅ Web アプリ側 実装済み（Hermes 側 `advice` サブコマンドは依頼中）
+### Phase 6 — 故障予防アドバイス（任意）✅ 実装済み・検証済み（Hermes 側 `advice` サブコマンド組み込みも完了）
 - backend: `GET /api/advice` — プログレッシブオーバーロード（週間VL比 + 種目別前回比）/ 頻度チェック（直近14日）/
   デロード自動判定（週間VLが直近4週平均の55%以下）/ 要チェック6種目の増量検知 / 警告サイン（notes パース）を集約。
   `service` 層に判定を集約、Web UI と Hermes `advice` サブコマンドで共用。→ [api.md](./api.md) / [domain.md](./domain.md)

@@ -31,6 +31,10 @@ Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自
 
 ## 技術選定
 
+> 実装済み。具体バージョン: frontend = Next.js 15.5.x（App Router, standalone）/ Node 24 / Tailwind v3 /
+> SWR / React Hook Form + Zod / Recharts。backend = Go 1.25 / `modernc.org/sqlite` /
+> prod は `gcr.io/distroless/static-debian12:nonroot`。
+
 ### frontend
 - **Next.js (App Router) + TypeScript** — 一覧/カレンダー/グラフを持つ SPA 寄りの画面。SSR も使える
 - **Tailwind CSS** + 自前コンポーネント（UI ライブラリは入れない）

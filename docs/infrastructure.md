@@ -11,7 +11,7 @@ nginx は HTTP（:80）で提供する。TLS は必須ではなく、必要な�
 |----------|----------|-----------|-----------|------|
 | `nginx` | 自前ビルド（`nginx:1.27-alpine` ベース） | 80 → ホスト公開（443 は任意） | `./nginx/conf.d`, TLS 証明書（任意） | frontend, backend |
 | `frontend` | 自前ビルド（Next.js standalone） | 3000（非公開） | なし | backend |
-| `backend` | 自前ビルド（Go, scratch/distroless） | 8080（非公開） | `training-data:/data` | なし |
+| `backend` | 自前ビルド（`golang:1.25` → `gcr.io/distroless/static-debian12:nonroot`, CGO 無効） | 8080（非公開） | `training-data:/data` | なし |
 
 - ホストに晒すのは **nginx のみ**。frontend/backend は compose ネットワーク内のみ。
 - `training-data` は named volume。`/data/training.db`（WAL 有効）。
@@ -40,7 +40,7 @@ training-record/
 実体はリポジトリ直下:
 
 - `compose.yaml` — 本番相当。nginx(80) / frontend / backend の 3 サービス、`training-data` volume、`./skill/.../training-logs` を `/bootstrap:ro` マウント
-- `compose.dev.yaml` — dev オーバーライド（バインドマウント、nginx はホスト :8080）
+- `compose.dev.yaml` — dev オーバーライド（バインドマウント、nginx はホスト :8081。8080 は他コンテナと競合するため）
 - `nginx/conf.d/app.conf` — `/api/` → backend（Hermes 用）、それ以外（`/bff`・`/_next`・`/`）→ frontend
 
 以下は設計上の要点（実装で踏んだ落とし穴とその対処を含む）。
@@ -76,44 +76,46 @@ LAN 内なので必須ではない。使う場合は自己署名証明書を `./
 ### backend（`backend/Dockerfile`）
 ```dockerfile
 # --- build ---
-FROM golang:1.23 AS build
+FROM golang:1.25 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
-# modernc.org/sqlite なので CGO 不要
+RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server   # modernc.org/sqlite なので CGO 不要
+RUN mkdir -p /data && chown 65532:65532 /data            # 空 named volume に所有権を継承させる
 
 # --- dev ---
-FROM golang:1.23 AS dev
+FROM golang:1.25 AS dev
 WORKDIR /src
+# 起動は compose.dev.yaml が上書き: sh -c "mkdir -p /app && go build -o /app/server ./cmd/server && exec /app/server"
 
 # --- runtime ---
-FROM gcr.io/distroless/static-debian12 AS prod
+FROM gcr.io/distroless/static-debian12:nonroot AS prod
+COPY --from=build --chown=65532:65532 /data /data
 COPY --from=build /out/server /app/server
 COPY --from=build /src/migrations /app/migrations
-USER nonroot:nonroot
+USER 65532:65532
 ENTRYPOINT ["/app/server"]
 ```
 
 ### frontend（`frontend/Dockerfile`）
 ```dockerfile
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-alpine AS dev
+FROM node:24-alpine AS dev
 WORKDIR /app
 
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ARG NEXT_PUBLIC_API_BASE=/bff
 RUN npm run build          # next.config: output: 'standalone'
 
-FROM node:22-alpine AS prod
+FROM node:24-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/.next/standalone ./
