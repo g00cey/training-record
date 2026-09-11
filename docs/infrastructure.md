@@ -144,7 +144,7 @@ COPY conf.d/ /etc/nginx/conf.d/
 
 ## 運用メモ
 
-- バックアップ: `training-data` volume を `docker run --rm -v training-record_training-data:/d -v $PWD:/b alpine tar czf /b/backup.tgz -C /d .`
+- バックアップ: `make db_backup`。backend の `server -backup <dest>` サブコマンドが `VACUUM INTO` で WAL を畳み込んだ単一ファイルを `/tmp` に書き、`docker compose cp` で `./backups/` へ取り出す（`training.db` の単純コピーでは WAL のデータを取りこぼすため）。volume 丸ごとの退避は `docker run --rm -v training-record_training-data:/d -v $PWD:/b alpine tar czf /b/backup.tgz -C /d .`
 - 初回移行のやり直し: volume 削除 → `docker compose up`（`BOOTSTRAP_DB_PATH` から再取り込み）
 - ログ: 各サービス `stdout`。集約は将来
 - CI: ホスティング未定のため当面はローカルの `make` タスク（`make lint` = `go vet` + `npm run lint`、`make test` = `go test ./...`、`make build` = `docker compose build`）。GitHub 等に載せた時点で Actions 化

@@ -41,6 +41,22 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// Backup writes a consistent, self-contained snapshot of db to dest using
+// SQLite's VACUUM INTO. Unlike copying training.db directly, this captures
+// data still sitting in the -wal/-shm sidecar files (the app runs in WAL
+// mode), producing a single checkpointed file that is safe to copy out of
+// the container. Any pre-existing dest is removed first so repeated backups
+// to the same path succeed (VACUUM INTO refuses to overwrite).
+func Backup(db *sql.DB, dest string) error {
+	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove existing backup %q: %w", dest, err)
+	}
+	if _, err := db.Exec(`VACUUM INTO ?`, dest); err != nil {
+		return fmt.Errorf("vacuum into %q: %w", dest, err)
+	}
+	return nil
+}
+
 // HasAppSchema reports whether the core application schema already exists
 // (used to decide whether the DB is brand new and bootstrap-eligible).
 func HasAppSchema(db *sql.DB) (bool, error) {

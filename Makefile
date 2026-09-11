@@ -46,5 +46,6 @@ clean:
 db_backup:
 	@mkdir -p backups
 	@BACKUP_FILE="backups/training_$$(date +%Y%m%d_%H%M%S).db"; \
-	docker compose cp backend:/data/training.db "$$BACKUP_FILE"; \
+	docker compose exec -T backend /app/server -backup /tmp/training-backup.db && \
+	docker compose cp backend:/tmp/training-backup.db "$$BACKUP_FILE" && \
 	echo "バックアップを作成しました: $$BACKUP_FILE"
