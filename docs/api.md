@@ -44,6 +44,7 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 | `get-exercise-list` | `GET /api/exercises` |
 | （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
 | （新規・Phase 6） | `GET /api/advice`（skill: `advice`） |
+| （新規・Phase 7） | `POST /api/spin-extract`（スピン画像抽出・Web UI 専用） |
 
 ---
 
@@ -135,6 +136,54 @@ DELETE /api/spin-sessions/2026-07-22        → 204
   "notes": "心拍ゾーン内訳: ウォームアップ8:16/インテンシブ10:42/..." }
 ```
 `rpe` が `null` かつ `avg_heart_rate` と `max_heart_rate` があれば `round(avg/max*10)` を 1–10 にクランプして保存（現行踏襲）。
+
+### スピン画像抽出（Phase 7）
+
+スピンバイクの運動結果画面（スクリーンショット等）から運動情報を抽出する。
+**DB に書かない純粋な変換エンドポイント**。抽出結果はブラウザ側で確認・修正してから
+`POST /api/spin-sessions` で保存する（OCR 誤読対策）。画像は一時利用のみで保存されない。
+
+```
+POST /api/spin-extract        (multipart/form-data, フィールド名 image)
+Content-Type: multipart/form-data; boundary=...
+→ 200 SpinExtractResult
+```
+
+- 画像: JPEG / PNG / WebP、上限 10MB。形式はボディの実バイトから判定（ヘッダ不信）
+- **`HERMES_API_URL` 未設定なら `503 hermes_not_configured`**（機能無効・既定）
+- backend → Hermes Agent は `POST {HERMES_API_URL}`（`Authorization: Bearer {HERMES_API_KEY}`、
+  body `{"imageBase64":"...","mimeType":"image/jpeg"}`）で抽出を依頼する
+  （Hermes 側契約 → [hermes-integration.md](./hermes-integration.md) Phase 7）
+- backend が応答を正規化する: ゾーン名は 5 正規名にマッピング（未知は破棄）、
+  `mm:ss` 検証（不一致・範囲外は `null` 化 + `uncertainFields` 行き）、
+  `avg > max` は両値保持のまま `uncertainFields` に明示
+- nginx は `/bff/spin-extract` の経路だけ `client_max_body_size 12m` / `proxy_read_timeout 120s`
+
+#### SpinExtractResult
+```json
+{
+  "durationMinutes": 52,
+  "avgHeartRate": 130,
+  "maxHeartRate": 156,
+  "distanceKm": 20.3,
+  "hrZones": { "ウォームアップ": "8:16", "インテンシブ": "10:42", "有酸素": "6:48",
+               "無酸素": "12:05", "最大酸素摂取量(高負荷)": "4:42" },
+  "freeNotes": "消費カロリー 480kcal",
+  "uncertainFields": ["distanceKm"]
+}
+```
+
+- `hrZones` は**常に全 5 ゾーンキー**を含む（未抽出は `null`）。ゾーン名は `docs/domain.md` の慣習フォーマットと同じ正規名
+- `date` と `rpe` は抽出対象外（日付はフォーム、RPE は保存時の自動算出に任せる）
+- `uncertainFields`: 読み取り確度が低い項目名（`durationMinutes` / `avgHeartRate` / `maxHeartRate` / `distanceKm` / `hrZones` / `freeNotes`。常に `[]`）
+
+#### エラー
+| status | code | 意味 |
+|--------|------|------|
+| 400 | `bad_request` | 画像なし / 形式不正 / 上限超過 |
+| 502 | `hermes_unreachable` / `hermes_error` | Hermes 未到達 / Hermes がエラー・非 JSON 応答 |
+| 503 | `hermes_not_configured` | `HERMES_API_URL` 未設定（機能無効） |
+| 504 | `hermes_timeout` | Hermes が 90 秒以内に応答せず |
 
 ### プリセット（名前付きメニュー）
 

@@ -2,8 +2,9 @@
 
 Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / `nginx` の 3 サービス Web アプリに移行する。
 
-> **状況（2026-09-10）: Phase 0〜6 実装・独立検証・移行すべて完了。** 以下は経緯の記録。
-> 運用カットオーバーの記録は [hermes-integration.md](./hermes-integration.md)。
+> **状況（2026-09-10）: Phase 0〜6 実装・独立検証・移行すべて完了。Phase 7A（スピン画像登録・Web 側）実装済み・
+> モック Hermes で検証済み。Phase 7B（Hermes 側抽出 API の用意・E2E）は依頼文送付待ち。**
+> 以下は経緯の記録。運用カットオーバーの記録は [hermes-integration.md](./hermes-integration.md)。
 
 ## ゴール
 
@@ -111,13 +112,38 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 - 出典: `SKILL.md` 故障予防アドバイス節、`references/`
 - Hermes 側への依頼文 → [hermes-integration.md](./hermes-integration.md) Phase 6
 
+### Phase 7 — スピンバイクの画像登録（Hermes Agent 画像抽出連携）
+
+スピンバイクの運動結果画面（スクリーンショット等）を Web UI からアップロードすると、
+Hermes Agent が画像から運動情報（時間・距離・平均/最大心拍・心拍ゾーン内訳）を抽出し、
+スピン記録フォームに自動入力する。**抽出と保存を分離**（抽出結果はユーザーが確認・修正してから
+既存 `POST /api/spin-sessions` で保存。OCR 誤読対策）。画像は一時利用のみで保存しない。
+
+- 7A（Web 側・モックで完結可能）✅ 実装済み:
+  - backend: `internal/hermes`（Hermes 抽出 API クライアント + 応答の正規化: ゾーン名 5 正規名へのマッピング /
+    `mm:ss` 検証 / 範囲チェック / `uncertainFields` 生成。camel/snake 両キー・コードフェンス防御的パース）
+  - backend: `POST /api/spin-extract`（multipart `image`、JPEG/PNG/WebP・10MB 上限・実バイト形式判定・
+    `HERMES_API_URL` 未設定なら 503。エラー `hermes_not_configured` / `hermes_unreachable` / `hermes_error` / `hermes_timeout`）。→ [api.md](./api.md)
+  - nginx: `/bff/spin-extract` 専用 location（`client_max_body_size 12m` / `proxy_read_timeout 120s`）。→ [infrastructure.md](./infrastructure.md)
+  - compose / `.env.example`: `HERMES_API_URL` / `HERMES_API_KEY`（任意・未設定なら機能無効）
+  - frontend: スピン新規登録フォームに「画像から入力」カード（ファイル選択・プレビュー・解析中 Spinner・
+    結果の自動反映 + 不確実項目の警告・エラー種別ごとのメッセージ）。`apiUpload`（multipart）を追加
+  - テスト: hermes パッケ（ラウンドトリップ・snake_case・フェンス・タイムアウト・正規化）+ httpapi（ハンドラ全ケースを httptest モックで）
+- 7B（Hermes 側・依頼文送付後）⏳ 未実施:
+  - [hermes-integration.md](./hermes-integration.md) Phase 7 の依頼文を Hermes Agent に送付 →
+    画像抽出 API（`POST {HERMES_API_URL}`）を用意してもらう
+  - URL / キーを共有してもらい `.env` に設定 → 実画像で E2E 確認（画像 → 自動入力 → 修正 → 保存 → 一覧反映）
+
+**完了条件**: 実画像をアップロードしてフォームに反映・修正・保存まで通しで動くこと（7B 含む。7A 単体はモック Hermes で検証済み）
+
 ## 依存関係
 
 ```
 Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3
-                   └─► Phase 4 ─► (グラフは Phase 2 の後ならいつでも)
+                    └─► Phase 4 ─► (グラフは Phase 2 の後ならいつでも)
 Phase 1 ─► Phase 5（API が揃い次第）
 Phase 4 ─► Phase 6
+Phase 1 ─► Phase 7A（Web 側・モック Hermes で完結）─► Phase 7B（Hermes 側 API 用意後に E2E）
 ```
 
 ## 非スコープ（今回やらない）

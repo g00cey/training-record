@@ -50,6 +50,7 @@ training-record/
 | nginx location | 転送先 | 用途 |
 |----------------|--------|------|
 | `/api/` | `backend:8080` | Hermes Agent。呼び出し側が `Authorization: Bearer` を保持 |
+| `/bff/spin-extract` | `frontend:3000` | スピン画像抽出（Phase 7）のみ。`client_max_body_size 12m` / `proxy_read_timeout 120s` と緩和（既定は 1m / 30s） |
 | `/bff/` | `frontend:3000` | ブラウザ。Next.js Route Handler `app/bff/[...path]` がサーバ側でキーを付与し backend へ中継 |
 | `/`（上記以外すべて） | `frontend:3000` | Next.js 本体・静的アセット（`/_next/...` 含む） |
 
@@ -138,6 +139,8 @@ COPY conf.d/ /etc/nginx/conf.d/
 | `API_KEY` | backend / frontend(runtime) | API 認証キー（必須・生成する）。frontend では Route Handler が backend 転送時に付与 |
 | `DB_PATH` | backend | 既定 `/data/training.db` |
 | `BOOTSTRAP_DB_PATH` | backend | 初回移行元。未設定/不在ならスキップ |
+| `HERMES_API_URL` | backend | スピン画像抽出（Phase 7）。Hermes Agent の抽出エンドポイント全体（例 `http://192.168.1.50:9000/extract-spin`）。未設定なら `POST /api/spin-extract` は 503（機能無効） |
+| `HERMES_API_KEY` | backend | Hermes 抽出 API の Bearer キー（Hermes Agent 側で生成・共有） |
 | `INTERNAL_API_BASE` | frontend(runtime) | Route Handler → backend `http://backend:8080/api` |
 | `NEXT_PUBLIC_API_BASE` | frontend(build) | ブラウザ用 `/bff` |
 | `TZ` | 全部 | `Asia/Tokyo` |

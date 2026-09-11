@@ -45,6 +45,9 @@ services:
       # 初回のみ: 既存 training.db をここから一度だけ取り込む。無ければスキップ
       BOOTSTRAP_DB_PATH: /bootstrap/training.db
       API_KEY: ${API_KEY:?set API_KEY in .env}
+      # スピン画像抽出（POST /api/spin-extract・Phase 7）。未設定なら 503（機能無効）
+      HERMES_API_URL: ${HERMES_API_URL:-}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
       TZ: Asia/Tokyo
     volumes:
       - training-data:/data

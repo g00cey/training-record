@@ -20,6 +20,7 @@ import (
 	"training-record/internal/config"
 	"training-record/internal/database"
 	"training-record/internal/domain"
+	"training-record/internal/hermes"
 	"training-record/internal/httpapi"
 	"training-record/internal/service"
 	"training-record/internal/store"
@@ -92,7 +93,15 @@ func run() error {
 
 	st := store.New(db)
 	svc := service.New(st)
-	handler := httpapi.NewRouter(svc, cfg.APIKey)
+
+	// 画像抽出（POST /api/spin-extract）は HERMES_API_URL があれば有効化
+	var hermesClient *hermes.Client
+	if cfg.HermesURL != "" {
+		hermesClient = hermes.New(hermes.Config{URL: cfg.HermesURL, APIKey: cfg.HermesKey})
+		log.Printf("startup: hermes image extraction enabled (%s)", cfg.HermesURL)
+	}
+
+	handler := httpapi.NewRouter(svc, cfg.APIKey, hermesClient)
 
 	srv := &http.Server{
 		Addr:              net.JoinHostPort("", cfg.Port),

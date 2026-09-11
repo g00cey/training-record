@@ -14,7 +14,7 @@ Hermes Agent のスキル **training-tracker**（筋力トレーニング + ス�
 2. `frontend` / `backend` / `nginx` の 3 コンポーネントに分割し `docker-compose` でインフラ設計
 3. Hermes Agent と情報をやり取りするための API 提供
 
-**現状: Phase 0〜6 実装済み・独立検証済み・移行完了（2026-09-10）**。Hermes は API 版スキル（v2）に切替済み。
+**現状: Phase 0〜6 実装済み・独立検証済み・移行完了（2026-09-10）。Phase 7A（スピン画像登録・Web 側）実装済み、7B（Hermes 側抽出 API）は依頼文送付待ち**。Hermes は API 版スキル（v2）に切替済み。
 進捗の詳細は [docs/plan.md](./docs/plan.md)、移行の記録は [docs/hermes-integration.md](./docs/hermes-integration.md)。
 
 ## リポジトリ構成

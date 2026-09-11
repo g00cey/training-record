@@ -13,6 +13,8 @@ type Config struct {
 	APIKey      string // API_KEY (required)
 	BootstrapDB string // BOOTSTRAP_DB_PATH (optional)
 	TZ          string // TZ (optional; informational + timezone override)
+	HermesURL   string // HERMES_API_URL (optional; enables POST /api/spin-extract)
+	HermesKey   string // HERMES_API_KEY (optional; bearer key for the Hermes extraction API)
 }
 
 // Load reads configuration from the environment. APIKey is required.
@@ -23,6 +25,8 @@ func Load() (*Config, error) {
 		APIKey:      os.Getenv("API_KEY"),
 		BootstrapDB: os.Getenv("BOOTSTRAP_DB_PATH"),
 		TZ:          os.Getenv("TZ"),
+		HermesURL:   os.Getenv("HERMES_API_URL"),
+		HermesKey:   os.Getenv("HERMES_API_KEY"),
 	}
 	if c.APIKey == "" {
 		return nil, fmt.Errorf("API_KEY is required")
