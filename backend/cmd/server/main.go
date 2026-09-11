@@ -4,6 +4,7 @@
 //
 //	server                 run the API server
 //	server -healthcheck    probe GET /api/health on $PORT; exit 0 iff 200
+//	server -backup <dest>  write a consistent snapshot of $DB_PATH to <dest>
 package main
 
 import (
@@ -29,6 +30,9 @@ func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "-healthcheck" || os.Args[1] == "--healthcheck") {
 		os.Exit(runHealthcheck())
 	}
+	if len(os.Args) > 1 && (os.Args[1] == "-backup" || os.Args[1] == "--backup") {
+		os.Exit(runBackup(os.Args[2:]))
+	}
 	if err := run(); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}
@@ -50,6 +54,32 @@ func runHealthcheck() int {
 		fmt.Fprintf(os.Stderr, "healthcheck: status %d\n", resp.StatusCode)
 		return 1
 	}
+	return 0
+}
+
+// runBackup writes a consistent snapshot of the database at $DB_PATH to
+// args[0] (VACUUM INTO). It is intentionally independent of API_KEY so it can
+// run as a one-shot maintenance command in an otherwise idle container.
+func runBackup(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: server -backup <dest.db>")
+		return 2
+	}
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./training.db"
+	}
+	db, err := database.Open(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "backup: open %q: %v\n", dbPath, err)
+		return 1
+	}
+	defer db.Close()
+	if err := database.Backup(db, args[0]); err != nil {
+		fmt.Fprintf(os.Stderr, "backup: %v\n", err)
+		return 1
+	}
+	fmt.Printf("backup: wrote %s (from %s)\n", args[0], dbPath)
 	return 0
 }
 
