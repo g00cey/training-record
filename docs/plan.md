@@ -61,7 +61,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 ### Phase 3 — カレンダー表示 ✅ 実装済み・検証済み
 - API: `GET /api/calendar?month=YYYY-MM`（`notes` から `kind` 判定、日別 Volume Load）
-- frontend: 月グリッド、種別バッジ（自重のみ / 自重＋FW / スピン）、日クリックで詳細
+- frontend: 月グリッド（週初め 日曜）、種別バッジ（自重のみ / 自重＋FW / スピン）、日クリックで詳細
 - 前月/翌月ナビ、当月ハイライト
 
 **完了条件**: カレンダーで実施日と種別が一目でわかり、日付から記録詳細に飛べる

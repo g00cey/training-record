@@ -71,13 +71,13 @@ export type MonthCell = {
 };
 
 /**
- * 月グリッド（週の始まり = 月曜）。前後の月のこぼれ日も埋めて 6 週ぶんの配列を返す。
+ * 月グリッド（週の始まり = 日曜）。前後の月のこぼれ日も埋めて 6 週ぶんの配列を返す。
  */
 export function monthGrid(month: string): MonthCell[][] {
   const { y, m } = parseMonth(month);
   const total = daysInMonth(y, m);
-  // 月初の曜日を月曜起点(0=月 .. 6=日)に変換
-  const firstDow = (weekdayIndex(formatDate(y, m, 1)) + 6) % 7;
+  // 月初の曜日を日曜起点(0=日 .. 6=土)で取得
+  const firstDow = weekdayIndex(formatDate(y, m, 1));
 
   const cells: MonthCell[] = [];
 
@@ -124,4 +124,4 @@ export function longLabel(date: string): string {
   return `${y}年${m}月${d}日(${WEEKDAY_JA[weekdayIndex(date)]})`;
 }
 
-export const WEEKDAY_HEADERS = ['月', '火', '水', '木', '金', '土', '日'];
+export const WEEKDAY_HEADERS = ['日', '月', '火', '水', '木', '金', '土'];
