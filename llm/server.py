@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Optional
@@ -128,7 +129,13 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
+            "Authorization": f"Bearer {api_key}",
+            # urllib のデフォルト UA (Python-urllib/x.y) は Cloudflare の
+            # Bot 対策で 403 (error code: 1010) にブロックされるため明示的に上書きする
+            "User-Agent": "spin-image-extraction/1.0",
+            # OpenCode Go はルーティング最適化のため会話ごとに安定した
+            # セッション ID を要求する。1 リクエスト = 1 会話として扱う
+            "X-OpenCode-Session": str(uuid.uuid4())
         },
         method="POST"
     )

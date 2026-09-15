@@ -6,7 +6,7 @@ import sys
 import urllib.request
 import urllib.error
 
-BASE_URL = "http://localhost:8647"
+BASE_URL = "http://localhost:8646"
 API_KEY = os.environ.get("SPIN_EXTRACT_API_KEY", "")
 
 
