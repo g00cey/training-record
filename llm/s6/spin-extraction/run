@@ -1,0 +1,11 @@
+#!/command/execlineb -P
+# Spin Bike Image Extraction Server - s6 service
+# /etc/s6/sv/spin-extraction/run
+
+if { s6-setuidgid hermes }
+if { s6-envdir /opt/data/skills/fitness/spin-image-extraction/s6/envdir }
+background {
+  cd /opt/data
+  export $(cat /opt/data/.env | grep -v '^#' | xargs)
+}
+exec python3 /opt/data/skills/fitness/spin-image-extraction/server.py

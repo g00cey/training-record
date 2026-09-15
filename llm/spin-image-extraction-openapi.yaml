@@ -1,0 +1,322 @@
+openapi: 3.0.3
+info:
+  title: Spin Bike Image Extraction API
+  description: |
+    スピンバイクの運動結果画像をアップロードすると、
+    Vision LLM で画像解析し、運動情報を構造化 JSON で返す HTTP エンドポイント。
+    
+    ## 認証
+    Authorization: Bearer <SPIN_EXTRACT_API_KEY>
+    
+    ## タイムアウト
+    レスポンスは 90 秒以内（Web アプリ側の経路が 120 秒で切れるため）。
+    長い場合は最悪でも破棄してエラー応答。
+    
+    ## 抽出ルール
+    - 読み取れない・写っていない項目は null（推測しない）
+    - ゾーン名は正規 5 名に正規化（該当しないものは省略）
+    - ゾーン時間は mm:ss（60 分超は mmm:ss）
+    - 心拍は整数 bpm、距離は km の小数
+    - 日付と RPE は抽出しない（Web 側で入力・自動算出するため）
+    - レスポンスは JSON のみ（コードブロック等の装飾なし）
+  version: 1.0.0
+  contact:
+    name: Hermes Agent
+servers:
+  - url: http://172.16.10.1:8646
+    description: Hermes Agent (Proxmox Docker)
+
+security:
+  - BearerAuth: []
+
+paths:
+  /extract-spin:
+    post:
+      operationId: extractSpinExercise
+      summary: スピンバイク画像から運動情報を抽出
+      description: |
+        スピンバイクの運動結果画面（スクリーンショット等）の base64 エンコード画像を受け取り、
+        Vision LLM で解析して運動情報を構造化 JSON で返します。
+        
+        ### 処理フロー
+        1. 認証キー検証
+        2. リクエストバリデーション（base64 デコード確認）
+        3. Vision LLM（OpenRouter）に画像解析リクエスト（90 秒制限）
+        4. レスポンスのスキーマ検証
+        5. JSON 応答
+        
+        ### エラーハンドリング
+        - 400: リクエスト形式エラー（base64 不正、mimeType 欠落）
+        - 401: 認証キー不正
+        - 408: タイムアウト（90 秒超過）
+        - 500: サーバ内部エラー（LLM API 失敗等）
+      tags:
+        - extraction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractionRequest'
+            examples:
+              jpeg_image:
+                summary: JPEG 画像の例
+                value:
+                  imageBase64: "/9j/4AAQSkZJRg..."
+                  mimeType: "image/jpeg"
+              png_image:
+                summary: PNG 画像の例
+                value:
+                  imageBase64: "iVBORw0KGgo..."
+                  mimeType: "image/png"
+      responses:
+        '200':
+          description: 抽出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractionResponse'
+              examples:
+                complete_extraction:
+                  summary: 全項目読み取り成功
+                  value:
+                    durationMinutes: 52
+                    avgHeartRate: 130
+                    maxHeartRate: 156
+                    distanceKm: 20.3
+                    hrZones:
+                      ウォームアップ: "8:16"
+                      インテンシブ: "10:42"
+                      有酸素: "6:48"
+                      無酸素: "12:05"
+                      最大酸素摂取量: "4:42"
+                    freeNotes: "消費カロリー 480kcal"
+                    uncertainFields: []
+                partial_extraction:
+                  summary: 部分的な読み取り
+                  value:
+                    durationMinutes: 45
+                    avgHeartRate: 142
+                    maxHeartRate: null
+                    distanceKm: null
+                    hrZones:
+                      ウォームアップ: "5:30"
+                      有酸素: "20:00"
+                      無酸素: "15:00"
+                    freeNotes: ""
+                    uncertainFields: ["distanceKm", "maxHeartRate"]
+        '400':
+          description: リクエスト形式エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_fields:
+                  summary: 必須フィールド欠落
+                  value:
+                    error: "BadRequest"
+                    message: "imageBase64 and mimeType are required"
+                invalid_base64:
+                  summary: base64 エンコード不正
+                  value:
+                    error: "BadRequest"
+                    message: "Invalid base64 encoding"
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Unauthorized"
+                message: "Invalid or missing Bearer token"
+        '408':
+          description: タイムアウト
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Timeout"
+                message: "Image analysis exceeded 90s limit"
+        '500':
+          description: サーバ内部エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "InternalError"
+                message: "Vision LLM API request failed"
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: ヘルスチェック
+      description: サーバの稼働状態を確認します。認証不要。
+      tags:
+        - system
+      security: []
+      responses:
+        '200':
+          description: 正常稼働
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  version:
+                    type: string
+                    example: "1.0.0"
+                  timestamp:
+                    type: string
+                    format: date-time
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        SPIN_EXTRACT_API_KEY と同一の静的トークン。
+        Hermes 側 .env の SPIN_EXTRACT_API_KEY と一致する値。
+  
+  schemas:
+    ExtractionRequest:
+      type: object
+      required:
+        - imageBase64
+        - mimeType
+      properties:
+        imageBase64:
+          type: string
+          description: |
+            画像の base64 エンコード文字列。
+            対応形式: JPEG, PNG, WebP
+          minLength: 100
+          example: "/9j/4AAQSkZJRgABAQEASABIAAD..."
+        mimeType:
+          type: string
+          description: 画像の MIME タイプ
+          enum:
+            - image/jpeg
+            - image/png
+            - image/webp
+          example: "image/jpeg"
+
+    ExtractionResponse:
+      type: object
+      description: |
+        抽出された運動情報。読み取れない項目は null。
+        uncertainFields に確度の低い項目名を列挙。
+      properties:
+        durationMinutes:
+          type: integer
+          nullable: true
+          description: |
+            運動時間（分）。整数。
+            h:mm 表記は分に換算（例: 1:30 → 90）
+          minimum: 0
+          example: 52
+        avgHeartRate:
+          type: integer
+          nullable: true
+          description: 平均心拍数（bpm）。整数。
+          minimum: 30
+          maximum: 250
+          example: 130
+        maxHeartRate:
+          type: integer
+          nullable: true
+          description: 最大心拍数（bpm）。整数。
+          minimum: 30
+          maximum: 250
+          example: 156
+        distanceKm:
+          type: number
+          nullable: true
+          format: float
+          description: 距離（km）。小数。
+          minimum: 0
+          example: 20.3
+        hrZones:
+          type: object
+          nullable: true
+          description: |
+            心拍ゾーン内訳。キーは正規 5 名。
+            読み取れないゾーンは省略（null ではなくキー自体が存在しない）。
+            時間は mm:ss（60 分超は mmm:ss）。
+          properties:
+            ウォームアップ:
+              type: string
+              nullable: true
+              pattern: '^\d{1,3}:\d{2}$'
+              description: Zone 1 ウォームアップ
+              example: "8:16"
+            インテンシブ:
+              type: string
+              nullable: true
+              pattern: '^\d{1,3}:\d{2}$'
+              description: Zone 2 インテンシブ
+              example: "10:42"
+            有酸素:
+              type: string
+              nullable: true
+              pattern: '^\d{1,3}:\d{2}$'
+              description: Zone 3 有酸素
+              example: "6:48"
+            無酸素:
+              type: string
+              nullable: true
+              pattern: '^\d{1,3}:\d{2}$'
+              description: Zone 4 無酸素
+              example: "12:05"
+            最大酸素摂取量:
+              type: string
+              nullable: true
+              pattern: '^\d{1,3}:\d{2}$'
+              description: Zone 5 最大酸素摂取量（高負荷）
+              example: "4:42"
+        freeNotes:
+          type: string
+          description: |
+            心拍ゾーン内訳以外の有用な情報（消費カロリー等）。
+            無ければ空文字列。
+          example: "消費カロリー 480kcal"
+        uncertainFields:
+          type: array
+          items:
+            type: string
+            enum:
+              - durationMinutes
+              - avgHeartRate
+              - maxHeartRate
+              - distanceKm
+              - hrZones
+              - freeNotes
+          description: |
+            読み取り確度が低い項目名のリスト。
+            確実に読めた項目は含めない。
+          example: ["distanceKm"]
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: エラーコード
+          enum:
+            - BadRequest
+            - Unauthorized
+            - Timeout
+            - InternalError
+        message:
+          type: string
+          description: 人間が読めるエラー説明

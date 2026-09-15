@@ -1,0 +1,15 @@
+services:
+  spin-extraction:
+    build: .
+    container_name: spin-extraction
+    restart: unless-stopped
+    ports:
+      - "8646:8646"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8646/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
