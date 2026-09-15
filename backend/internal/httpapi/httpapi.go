@@ -11,17 +11,20 @@ import (
 	"net/http"
 
 	"training-record/internal/apperr"
+	"training-record/internal/hermes"
 	"training-record/internal/service"
 )
 
-// Handlers holds the service dependency for all HTTP handlers.
+// Handlers holds the dependencies for all HTTP handlers.
 type Handlers struct {
-	svc *service.Service
+	svc    *service.Service
+	hermes *hermes.Client // nil = 画像抽出（/api/spin-extract）は未設定
 }
 
 // NewRouter builds the fully-wired HTTP handler (routes + auth middleware).
-func NewRouter(svc *service.Service, apiKey string) http.Handler {
-	h := &Handlers{svc: svc}
+// hc may be nil: POST /api/spin-extract then answers 503.
+func NewRouter(svc *service.Service, apiKey string, hc *hermes.Client) http.Handler {
+	h := &Handlers{svc: svc, hermes: hc}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", handle(h.health))
@@ -45,6 +48,7 @@ func NewRouter(svc *service.Service, apiKey string) http.Handler {
 	mux.HandleFunc("PUT /api/spin-sessions/{date}", handle(h.putSpin))
 	mux.HandleFunc("PATCH /api/spin-sessions/{date}", handle(h.patchSpin))
 	mux.HandleFunc("DELETE /api/spin-sessions/{date}", handle(h.deleteSpin))
+	mux.HandleFunc("POST /api/spin-extract", handle(h.spinExtract))
 
 	// presets (named menus)
 	mux.HandleFunc("GET /api/presets", handle(h.listPresets))

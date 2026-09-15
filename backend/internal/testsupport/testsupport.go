@@ -12,8 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"training-record/internal/database"
+	"training-record/internal/hermes"
 	"training-record/internal/httpapi"
 	"training-record/internal/service"
 	"training-record/internal/store"
@@ -46,10 +48,27 @@ func NewService(t testing.TB) (*service.Service, *store.Store) {
 }
 
 // NewRouter returns the HTTP handler wired to a fresh migrated database,
-// using apiKey for auth.
+// using apiKey for auth. The Hermes extraction client is unset (503 on
+// POST /api/spin-extract).
 func NewRouter(t testing.TB, apiKey string) (http.Handler, *store.Store) {
 	svc, st := NewService(t)
-	return httpapi.NewRouter(svc, apiKey), st
+	return httpapi.NewRouter(svc, apiKey, nil), st
+}
+
+// NewRouterWithHermes is NewRouter plus a Hermes extraction client pointed
+// at hermesURL ("" = unconfigured).
+func NewRouterWithHermes(t testing.TB, apiKey, hermesURL, hermesKey string) http.Handler {
+	t.Helper()
+	svc, _ := NewService(t)
+	if hermesURL == "" {
+		return httpapi.NewRouter(svc, apiKey, nil)
+	}
+	hc := hermes.New(hermes.Config{
+		URL:     hermesURL,
+		APIKey:  hermesKey,
+		Timeout: 5 * time.Second,
+	})
+	return httpapi.NewRouter(svc, apiKey, hc)
 }
 
 // LegacyDBPath is the on-disk legacy training.db, relative to a test
@@ -77,5 +96,5 @@ func NewBootstrappedDB(t testing.TB) *sql.DB {
 // NewBootstrappedRouter is NewRouter over a bootstrapped database.
 func NewBootstrappedRouter(t testing.TB, apiKey string) (http.Handler, *store.Store) {
 	st := store.New(NewBootstrappedDB(t))
-	return httpapi.NewRouter(service.New(st), apiKey), st
+	return httpapi.NewRouter(service.New(st), apiKey, nil), st
 }

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import useSWR from 'swr';
-import { apiMutate, ApiError, fetcher } from '@/lib/client';
+import { apiMutate, apiUpload, ApiError, fetcher } from '@/lib/client';
 import { numOrNull, spinFormSchema } from '@/lib/schemas';
 import {
   composeSpinNotes,
@@ -16,7 +16,7 @@ import {
   parseHrZones,
   type HrZoneValues,
 } from '@/lib/domain';
-import type { SpinSession } from '@/lib/types';
+import type { SpinExtractResult, SpinSession } from '@/lib/types';
 import { longLabel, todayJST } from '@/lib/date';
 import {
   Button,
@@ -45,6 +45,36 @@ function blankZones(): HrZoneValues {
   return emptyHrZones();
 }
 
+// 画像抽出（POST /api/spin-extract）のクライアント側上限。サーバと同じ。
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const EXTRACT_FIELD_LABEL: Record<string, string> = {
+  durationMinutes: '時間',
+  avgHeartRate: '平均心拍',
+  maxHeartRate: '最大心拍',
+  distanceKm: '距離',
+  hrZones: '心拍ゾーン内訳',
+  freeNotes: 'メモ',
+};
+
+function extractErrorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    switch (e.code) {
+      case 'hermes_not_configured':
+        return '画像解析は未設定です（サーバの HERMES_API_URL / HERMES_API_KEY を設定してください）';
+      case 'hermes_timeout':
+        return '解析がタイムアウトしました。しばらく待って再試行するか、手入力してください';
+      case 'hermes_unreachable':
+        return 'Hermes Agent に接続できませんでした。Hermes 側の起動を確認してください';
+      case 'hermes_error':
+        return e.message;
+      default:
+        return e.message;
+    }
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
 export function SpinSessionForm({
   mode,
   date: routeDate,
@@ -58,6 +88,101 @@ export function SpinSessionForm({
   );
   const [serverError, setServerError] = useState<string | null>(null);
   const [conflictDate, setConflictDate] = useState<string | null>(null);
+
+  // --- 画像から入力（新規モードのみ・POST /bff/spin-extract） ---
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractInfo, setExtractInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+    };
+  }, [imagePreview]);
+
+  function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    setExtractError(null);
+    setExtractInfo(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    if (!f) {
+      setImageFile(null);
+      setImagePreview(null);
+      return;
+    }
+    if (f.size > MAX_IMAGE_BYTES) {
+      setImageFile(null);
+      setImagePreview(null);
+      setExtractError(
+        `画像が大きすぎます（${(f.size / 1024 / 1024).toFixed(1)} MB。上限 10MB）`,
+      );
+      return;
+    }
+    setImageFile(f);
+    setImagePreview(URL.createObjectURL(f));
+  }
+
+  function applyExtract(res: SpinExtractResult) {
+    const filled: string[] = [];
+    if (res.durationMinutes != null) {
+      setValue('durationMinutes', String(res.durationMinutes));
+      filled.push('時間');
+    }
+    if (res.avgHeartRate != null) {
+      setValue('avgHeartRate', String(res.avgHeartRate));
+      filled.push('平均心拍');
+    }
+    if (res.maxHeartRate != null) {
+      setValue('maxHeartRate', String(res.maxHeartRate));
+      filled.push('最大心拍');
+    }
+    if (res.distanceKm != null) {
+      setValue('distanceKm', String(res.distanceKm));
+      filled.push('距離');
+    }
+    // ゾーンは抽出できたものだけ上書き（入力済みの他ゾーンは残す）
+    const zones = { ...(form.getValues('hrZones') ?? blankZones()) };
+    let zoneCount = 0;
+    for (const z of HR_ZONES) {
+      const v = res.hrZones?.[z];
+      if (v) {
+        zones[z] = v;
+        zoneCount += 1;
+      }
+    }
+    if (zoneCount > 0) {
+      setValue('hrZones', zones);
+      filled.push('心拍ゾーン内訳');
+    }
+    if (res.freeNotes) {
+      const current = (form.getValues('freeNotes') ?? '').trim();
+      setValue('freeNotes', current ? `${current}\n${res.freeNotes}` : res.freeNotes);
+    }
+    const labels = res.uncertainFields
+      .map((f) => EXTRACT_FIELD_LABEL[f] ?? f)
+      .join('・');
+    setExtractInfo(
+      `画像の内容をフォームに反映しました（${filled.join('・') || '該当項目なし'}）。内容を確認・修正してから保存してください。`
+      + (labels ? `\n読み取りが不確かな項目: ${labels} — 数値をご確認ください。` : ''),
+    );
+  }
+
+  async function onExtract() {
+    if (!imageFile) return;
+    setExtracting(true);
+    setExtractError(null);
+    setExtractInfo(null);
+    try {
+      const res = await apiUpload<SpinExtractResult>('/spin-extract', imageFile);
+      applyExtract(res);
+    } catch (e) {
+      setExtractError(extractErrorMessage(e));
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   const existing = useSWR<SpinSession>(
     mode === 'edit' && routeDate ? `/spin-sessions/${routeDate}` : null,
@@ -194,6 +319,52 @@ export function SpinSessionForm({
         </Toast>
       )}
       {serverError && <Toast kind="error">{serverError}</Toast>}
+
+      {mode === 'new' && (
+        <Card className="space-y-3">
+          <h3 className="font-semibold text-gray-800">画像から入力（任意）</h3>
+          <p className="text-xs text-gray-500">
+            スピンバイクの運動結果（アプリのスクリーンショット等）をアップロードすると、
+            Hermes Agent が時間・心拍・心拍ゾーン内訳などを読み取り、このフォームに反映します。
+            解析には数十秒かかることがあります。画像は保存されません（抽出結果のみ登録）。
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="text-sm"
+              disabled={extracting}
+              onChange={onPickImage}
+            />
+            {imageFile && (
+              <span className="text-xs text-gray-500">
+                {imageFile.name}（{(imageFile.size / 1024 / 1024).toFixed(1)} MB）
+              </span>
+            )}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onExtract}
+              disabled={!imageFile || extracting}
+            >
+              {extracting ? '解析中…' : '画像を解析'}
+            </Button>
+          </div>
+          {imagePreview && (
+            /* eslint-disable-next-line @next/next/no-img-element -- プレビューはユーザーが選んだローカル blob のため next/image 不要 */
+            <img
+              src={imagePreview}
+              alt="アップロードした運動結果のプレビュー"
+              className="max-h-48 rounded-md border border-gray-200"
+            />
+          )}
+          {extracting && (
+            <Spinner label="Hermes Agent が画像を解析中です…（数十秒かかることがあります）" />
+          )}
+          {extractError && <Toast kind="error">{extractError}</Toast>}
+          {extractInfo && <Toast kind="info">{extractInfo}</Toast>}
+        </Card>
+      )}
 
       <Card className="grid gap-4 sm:grid-cols-3">
         <Field label="日付" error={errors.date?.message as string | undefined}>

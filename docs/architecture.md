@@ -14,13 +14,16 @@ DB は backend コンテナ内の SQLite ファイル（named volume に永続�
 
 ```
 ブラウザ ──► nginx :80/:443
-                │  location /        ──► frontend:3000   (Next.js 本体・静的アセット)
-                │  location /bff/    ──► frontend:3000   (Next.js Route Handler /bff/[...path])
-                │                            └─ サーバ側で Authorization: Bearer を付与
-                │                               INTERNAL_API_BASE (http://backend:8080/api) へ転送
-                │  location /api/    ──► backend:8080     (Go REST API・Hermes 用)
-                                             │
-                                             └──► SQLite (/data/training.db, volume: training-data)
+                 │  location /        ──► frontend:3000   (Next.js 本体・静的アセット)
+                 │  location /bff/    ──► frontend:3000   (Next.js Route Handler /bff/[...path])
+                 │                            └─ サーバ側で Authorization: Bearer を付与
+                 │                               INTERNAL_API_BASE (http://backend:8080/api) へ転送
+                 │  location /bff/spin-extract ──► frontend:3000 (画像 12MB / timeout 120s のみ緩和)
+                 │  location /api/    ──► backend:8080     (Go REST API・Hermes 用)
+                                              │
+                                              ├──► SQLite (/data/training.db, volume: training-data)
+                                              │
+                                              └──► Hermes Agent (POST {HERMES_API_URL}・スピン画像抽出のみ)
 
 Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自身が API キーを保持)
 ```
@@ -28,6 +31,8 @@ Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自
 - frontend は backend を**直接参照しない**。ブラウザは同一オリジンの `/bff/*` のみを叩き、Next.js の Route Handler が `INTERNAL_API_BASE` + API キーで backend に中継する。
 - ブラウザ公開用のベースパスは `/bff`（`NEXT_PUBLIC_API_BASE=/bff`）。`/api` は backend 直で、キーを持つ Hermes Agent 専用。
 - この分離により API キーが意味を持つ（`/api` に到達するには キーが必須。ブラウザは `/api` を使わない）。
+- **スピン画像抽出（Phase 7）だけは逆向き**: backend が Hermes Agent の抽出 API を呼び出す
+  （`POST /api/spin-extract` → Hermes。`HERMES_API_URL` 未設定なら 503 で機能無効）。→ [api.md](./api.md) / [hermes-integration.md](./hermes-integration.md) Phase 7
 
 ## 技術選定
 
@@ -48,7 +53,7 @@ Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自
 - **DB アクセス**: `database/sql` + `modernc.org/sqlite`（Pure Go、CGO 不要 → scratch イメージが作れる）
 - **マイグレーション**: `embed` した連番 SQL を起動時に適用する自前ランナー（`schema_migrations` テーブル管理）。→ [data-model.md](./data-model.md)
 - **レイヤ**: `handler`（HTTP） → `service`（ドメインロジック・分析計算） → `store`（SQL）
-- **設定**: 環境変数のみ（`DB_PATH`, `API_KEY`, `PORT`, `TZ`, `BOOTSTRAP_DB_PATH`）
+- **設定**: 環境変数のみ（`DB_PATH`, `API_KEY`, `PORT`, `TZ`, `BOOTSTRAP_DB_PATH`, `HERMES_API_URL`, `HERMES_API_KEY`）
 
 ### 分析ロジックの移植元
 - `skill/.hermes/skills/productivity/training-tracker/scripts/training_db.py` … CRUD・ルーティン・集計 SQL

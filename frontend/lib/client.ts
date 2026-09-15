@@ -64,3 +64,21 @@ export async function apiMutate<T = unknown>(
   }
   return (data as T) ?? null;
 }
+
+/** ファイルアップロード（multipart/form-data の image フィールド）。 */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append('image', file);
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { accept: 'application/json' },
+    body: form,
+  });
+  const data = await parse(res);
+  if (!res.ok) {
+    const code = data?.error?.code ?? 'error';
+    const message = data?.error?.message ?? `アップロードに失敗しました (HTTP ${res.status})`;
+    throw new ApiError(res.status, code, message);
+  }
+  return data as T;
+}

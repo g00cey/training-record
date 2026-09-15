@@ -137,7 +137,7 @@ export function Toast({
   kind,
   children,
 }: {
-  kind: 'success' | 'error';
+  kind: 'success' | 'error' | 'info';
   children: ReactNode;
 }) {
   return (
@@ -146,7 +146,9 @@ export function Toast({
         'rounded-md border p-3 text-sm',
         kind === 'success'
           ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-          : 'border-red-200 bg-red-50 text-red-800',
+          : kind === 'info'
+            ? 'border-blue-200 bg-blue-50 text-blue-800'
+            : 'border-red-200 bg-red-50 text-red-800',
       )}
     >
       {children}

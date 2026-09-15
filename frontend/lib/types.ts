@@ -44,6 +44,20 @@ export type SpinSessionList = {
   total: number;
 };
 
+// --- スピン画像抽出（POST /api/spin-extract・Phase 7） ---
+// hrZones のキーは lib/domain.ts の HR_ZONES 5 ゾーン（常に全キー存在、
+// 未抽出は null）。date / rpe は抽出対象外（フォーム入力・自動算出のため）。
+
+export type SpinExtractResult = {
+  durationMinutes: number | null;
+  avgHeartRate: number | null;
+  maxHeartRate: number | null;
+  distanceKm: number | null;
+  hrZones: Record<string, string | null>;
+  freeNotes: string;
+  uncertainFields: string[];
+};
+
 export type RoutineExercise = {
   id: number;
   name: string;

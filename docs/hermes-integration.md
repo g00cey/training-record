@@ -194,4 +194,110 @@ Phase 6 では backend に `GET /api/advice`（判定の集約）を追加し、
 >
 > ※ `GET /api/advice` の一部項目（`deload` の判定方法、`warningSigns` の拾い方など）は
 > データモデルの決定次第で変わる可能性があります。決まり次第この文面を更新します。
+
+---
+
+## Phase 7（スピンバイク画像登録）— Hermes 側への依頼
+
+スピンバイクの運動結果画面（アプリのスクリーンショット等）を Web UI からアップロードして
+運動情報（時間・距離・平均/最大心拍・心拍ゾーン別の時間内訳）を自動入力する機能。
+Web アプリ側（backend `POST /api/spin-extract` → Hermes Agent の抽出 API）は **実装済み**。
+Hermes 側には **画像を受け取って構造化 JSON を返す HTTP エンドポイント** を用意してもらう。
+
+- 状況（2026-09-10）: 7A（Web 側・モック Hermes 検証済み）完了。7B（Hermes 側）は下記依頼文の送付待ち。
+
+### データの流れ（Phase 7 のみ逆向きの呼び出し）
+
+```
+ブラウザ ── POST /bff/spin-extract (multipart 画像) ──► nginx ──► Next.js (/bff) ──► backend /api/spin-extract
+                                                                                          │ base64 JSON + Bearer
+                                                                                          ▼
+                                                                                Hermes Agent 抽出 API（本依頼）
+                                                                                          │ 構造化 JSON
+frontend: フォーム自動反映 → ユーザー確認・修正 → POST /api/spin-sessions で保存（既存フロー）
+```
+
+抽出と保存を分離しているため、Hermes 側は**保存しない（抽出のみ）**。
+日付はフォーム入力、RPE は保存時の自動算出（avg/max から）に任せるため、いずれも抽出対象外。
+
+### Hermes Agent に送る依頼（そのまま貼れる文面）
+
+> **依頼: スピンバイクの運動結果画像から運動情報を抽出する HTTP API を用意してください（Phase 7）**
+>
+> training-record Web アプリに、スピンバイクの運動結果画面（スクリーンショット等）を
+> アップロードすると運動情報をフォームに自動入力する機能を追加しました。
+> 画像からの情報抽出を Hermes Agent に依頼したいので、次の HTTP エンドポイントを用意してください。
+>
+> **1. エンドポイント**
+> - `POST <Hermes 側で決めた URL>`（例: `http://<Hermesのホスト>:<ポート>/extract-spin`）。
+>   パス・ポートは Hermes 側の都合で決めて構いません。決めたら URL を教えてください。
+> - 認証: `Authorization: Bearer <静的キー>`。キーは Hermes 側で生成して安全な経路で共有してください
+>   （この Web アプリの `API_KEY` とは別の値で構いません）。
+> - 応答は **90 秒以内**（Web 側の経路が 120 秒で切れるため）。長い場合は最悪でも破棄してエラー応答。
+>
+> **2. リクエスト（Web アプリ backend が送るもの）**
+> ```json
+> POST /extract-spin
+> Authorization: Bearer <キー>
+> Content-Type: application/json
+>
+> { "imageBase64": "<JPEG/PNG/WebP 画像の base64>", "mimeType": "image/jpeg" }
+> ```
+>
+> **3. レスポンス（Hermes が返すもの・厳密な契約）**
+> ```json
+> {
+>   "durationMinutes": 52,
+>   "avgHeartRate": 130,
+>   "maxHeartRate": 156,
+>   "distanceKm": 20.3,
+>   "hrZones": {
+>     "ウォームアップ": "8:16",
+>     "インテンシブ": "10:42",
+>     "有酸素": "6:48",
+>     "無酸素": "12:05",
+>     "最大酸素摂取量(高負荷)": "4:42"
+>   },
+>   "freeNotes": "消費カロリー 480kcal",
+>   "uncertainFields": ["distanceKm"]
+> }
+> ```
+>
+> 抽出ルール:
+> - **読み取れない・写っていない項目は `null`**（推測しない）。`hrZones` の各ゾーンも同様に `null`
+> - ゾーン名（`hrZones` のキー）は上記 **5 つの正規名** に正規化して返す
+>   （アプリの表記ゆれ・英語表記・Zone 1–5 等はこの 5 名に割り当て。該当しないものは省略）
+> - ゾーンの時間は `mm:ss`（60 分超は `mmm:ss`）。`durationMinutes` は整数分（`h:mm` 表記は換算）
+> - 心拍は整数 bpm、距離は km の小数
+> - `freeNotes` には心拍ゾーン内訳以外の有用な情報（消費カロリー等）を簡潔に。無ければ空文字
+> - `uncertainFields` に読み取り確度が低い項目名（`durationMinutes` / `avgHeartRate` / `maxHeartRate` /
+>   `distanceKm` / `hrZones` / `freeNotes` のいずれか）を列挙。無ければ `[]`
+> - **日付と RPE は抽出しない**（Web 側で入力・自動算出するため）
+> - レスポンスは **JSON のみ**（``` コードブロック等の装飾を付けない。Web 側でも防御的にパースするが契約は素の JSON）
+> - 実装方式（既存スキルのワークフローでも専用ハンドラでも）は問いません。
+>   要は「画像を投げたら上記 JSON が返る HTTP エンドポイント」です。
+>
+> **4. 動作確認（Hermes 側）**
+> ```bash
+> curl -s -X POST <URL> -H "Authorization: Bearer <キー>" \
+>   -H "Content-Type: application/json" \
+>   -d '{"imageBase64":"<適当な画像のbase64>","mimeType":"image/png"}'
+> # → 上記の形の JSON
+> ```
+>
+> **5. 完了報告**: URL とキー、実装方式の概要、上記契約から変えた点があればその内容を教えてください。
+>   受け取ったら Web アプリ側の `.env` に設定して実画像で E2E 確認します。
+
+### 7B の手順（Hermes 側 API が用意されたら）
+
+1. `.env` に `HERMES_API_URL`（報告された URL）と `HERMES_API_KEY` を設定
+2. `docker compose up -d --build backend` で再作成（起動ログに `hermes image extraction enabled` と出る）
+3. Web UI → スピン新規登録 → 画像アップロード → 「画像を解析」→ 自動入力 → 修正 → 保存
+4. 一覧・カレンダーに反映されること、`last-session`（Hermes 側）でも見えることを確認
+
+### 既知の注意点（Phase 7）
+
+- Hermes 抽出 API は画像しか受け取らず保存しない。保存は Web アプリの `POST /api/spin-sessions`
+- 画像は Web アプリに保存されない（抽出のために一時的に扱うのみ）
+- `HERMES_API_URL` 未設定でも Web アプリは起動する（`/api/spin-extract` は 503、UI は手入力のまま）
 </content>
