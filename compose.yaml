@@ -56,6 +56,9 @@ services:
     volumes:
       - training-data:/data
       - ./skill/.hermes/home/.hermes/training-logs:/bootstrap:ro
+      # 定期バックアップ（ofelia job-exec が -backup-daily で書き込む）の出力先。
+      # ホストに直接マウントしているので docker compose cp は不要
+      - ./backups:/backups
     expose:
       - "8080"
     healthcheck:
@@ -67,13 +70,15 @@ services:
       start_period: 20s
     restart: unless-stopped
     labels:
-      # ofelia（下記サービス）が1日1回 job-exec で叩く定期トレーニング評価バッチ
+      # ofelia（下記サービス）が1日1回 job-exec で叩く定期バッチ
       ofelia.enabled: "true"
       ofelia.job-exec.training-evaluation.schedule: "0 0 3 * * *" # 毎日 03:00 JST
       ofelia.job-exec.training-evaluation.command: "/app/server -evaluate-training"
+      ofelia.job-exec.db-backup.schedule: "0 0 2 * * *" # 毎日 02:00 JST
+      ofelia.job-exec.db-backup.command: "/app/server -backup-daily"
 
-  # 定期トレーニング評価（Phase 8）用のジョブスケジューラ。docker.sock 経由で
-  # backend コンテナに job-exec するだけで、それ自体は API を持たない。
+  # 定期トレーニング評価（Phase 8）・定期 DB バックアップ用のジョブスケジューラ。
+  # docker.sock 経由で backend コンテナに job-exec するだけで、それ自体は API を持たない。
   # docker.sock マウントはホストに対して強い権限を持つが、本プロジェクトは
   # 自宅 LAN 内限定・外部非公開が前提（docs/architecture.md）のため許容している。
   ofelia:

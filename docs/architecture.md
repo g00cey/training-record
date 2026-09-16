@@ -30,6 +30,7 @@ DB は backend コンテナ内の SQLite ファイル（named volume に永続�
 Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自身が API キーを保持)
 
 ofelia (docker-compose) ──► docker exec backend /app/server -evaluate-training （毎日 03:00 JST）
+                        ──► docker exec backend /app/server -backup-daily        （毎日 02:00 JST）
 ```
 
 - frontend は backend を**直接参照しない**。ブラウザは同一オリジンの `/bff/*` のみを叩き、Next.js の Route Handler が `INTERNAL_API_BASE` + API キーで backend に中継する。

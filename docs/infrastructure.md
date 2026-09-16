@@ -17,8 +17,9 @@ nginx は HTTP（:80）で提供する。TLS は必須ではなく、必要な�
 
 - ホストに晒すのは **nginx のみ**。frontend/backend/ofelia は compose ネットワーク内のみ。
 - `training-data` は named volume。`/data/training.db`（WAL 有効）。
-- `ofelia` は `backend` サービスの label（`ofelia.job-exec.training-evaluation.*`）を読み、
-  毎日 03:00 JST に `docker exec` で `/app/server -evaluate-training` を実行する（Phase 8）。
+- `ofelia` は `backend` サービスの label（`ofelia.job-exec.*`）を読み、`docker exec` で
+  毎日 03:00 JST に `/app/server -evaluate-training`（Phase 8）、毎日 02:00 JST に
+  `/app/server -backup-daily`（定期 DB バックアップ）を実行する。
 
 ## ファイル構成
 
@@ -154,12 +155,17 @@ COPY conf.d/ /etc/nginx/conf.d/
 
 ## 運用メモ
 
-- バックアップ: `make db_backup`。backend の `server -backup <dest>` サブコマンドが `VACUUM INTO` で WAL を畳み込んだ単一ファイルを `/tmp` に書き、`docker compose cp` で `./backups/` へ取り出す（`training.db` の単純コピーでは WAL のデータを取りこぼすため）。volume 丸ごとの退避は `docker run --rm -v training-record_training-data:/d -v $PWD:/b alpine tar czf /b/backup.tgz -C /d .`
-- 定期バックアップ: systemd timer（`db-backup.timer`）で毎日 02:00 JST（17:00 UTC）に自動実行。ユニットファイルはリポジトリ直下に配置。インストール手順: `sudo cp db-backup.service db-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now db-backup.timer`。確認: `systemctl list-timers db-backup.timer`。バックアップファイルは `./backups/training_YYYYMMDD_HHMMSS.db` に保存
-- 定期トレーニング評価（Phase 8）: systemd timer は増やさず、`compose.yaml` の `ofelia` サービスが `backend` の
-  label を見て毎日 03:00 JST に `/app/server -evaluate-training` を `docker exec` する。`docker compose up -d`
-  するだけで有効になる（追加のホスト設定は不要）。確認: `docker compose logs ofelia`。手動実行・動作確認は
-  `make evaluate_training`（`docker compose exec -T backend /app/server -evaluate-training`）。
+- バックアップ: backend の `server -backup-daily` サブコマンドが `VACUUM INTO` で WAL を畳み込んだ単一ファイル
+  `training_YYYYMMDD_HHMMSS.db` を `$BACKUP_DIR`（既定 `/backups`、`./backups:/backups` でホストへ bind mount）
+  に直接書く（`training.db` の単純コピーでは WAL のデータを取りこぼすため）。手動実行は `make db_backup`
+  （`docker compose exec -T backend /app/server -backup-daily`）。単発で任意の宛先に書きたい場合は
+  `server -backup <dest>` も残っている。volume 丸ごとの退避は
+  `docker run --rm -v training-record_training-data:/d -v $PWD:/b alpine tar czf /b/backup.tgz -C /d .`
+- 定期バックアップ・定期トレーニング評価（Phase 8）: systemd timer は使わず、`compose.yaml` の `ofelia` サービスが
+  `backend` の label を見て毎日 02:00 JST に `/app/server -backup-daily`、毎日 03:00 JST に
+  `/app/server -evaluate-training` を `docker exec` する。`docker compose up -d` するだけで有効になる
+  （追加のホスト設定は不要）。確認: `docker compose logs ofelia`。手動実行・動作確認は `make db_backup` /
+  `make evaluate_training`。
   `ofelia` は `/var/run/docker.sock` を読み取り専用マウントするが、Docker API 自体には読み書き制限が無いため
   実質ホストに対して強い権限を持つ。本プロジェクトは自宅 LAN 内限定・外部非公開が前提（[architecture.md](./architecture.md)）
   のためこれを許容している
