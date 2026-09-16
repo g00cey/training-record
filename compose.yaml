@@ -88,3 +88,9 @@ services:
 
 volumes:
   training-data:
+
+networks:
+  # llm/docker-compose.yml から external network として参照される
+  # （backend からスピン画像抽出サーバーへコンテナ名で到達できるようにする）
+  default:
+    name: training-record_default
