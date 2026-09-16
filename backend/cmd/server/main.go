@@ -5,6 +5,7 @@
 //	server                        run the API server
 //	server -healthcheck           probe GET /api/health on $PORT; exit 0 iff 200
 //	server -backup <dest>         write a consistent snapshot of $DB_PATH to <dest>
+//	server -backup-daily          write a timestamped snapshot of $DB_PATH into $BACKUP_DIR
 //	server -evaluate-training     run the daily LLM training evaluation batch (biweekly + bimonthly)
 package main
 
@@ -36,6 +37,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "-backup" || os.Args[1] == "--backup") {
 		os.Exit(runBackup(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "-backup-daily" || os.Args[1] == "--backup-daily") {
+		os.Exit(runBackupDaily())
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "-evaluate-training" || os.Args[1] == "--evaluate-training") {
 		os.Exit(runEvaluateTraining())
@@ -87,6 +91,44 @@ func runBackup(args []string) int {
 		return 1
 	}
 	fmt.Printf("backup: wrote %s (from %s)\n", args[0], dbPath)
+	return 0
+}
+
+// runBackupDaily writes a timestamped snapshot of $DB_PATH into $BACKUP_DIR
+// (default /backups). Intended to be invoked once a day by an external
+// scheduler (ofelia job-exec against this container; see compose.yaml) as
+// well as manually via `make db_backup`. Unlike -backup, the destination
+// filename is chosen by this command itself, since the prod image is
+// distroless (no shell) and can't do `$(date ...)` substitution.
+func runBackupDaily() int {
+	domain.SetTZ(os.Getenv("TZ"))
+
+	backupDir := os.Getenv("BACKUP_DIR")
+	if backupDir == "" {
+		backupDir = "/backups"
+	}
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "backup-daily: create %q: %v\n", backupDir, err)
+		return 1
+	}
+
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./training.db"
+	}
+	dest := fmt.Sprintf("%s/training_%s.db", backupDir, time.Now().In(domain.JST).Format("20060102_150405"))
+
+	db, err := database.Open(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "backup-daily: open %q: %v\n", dbPath, err)
+		return 1
+	}
+	defer db.Close()
+	if err := database.Backup(db, dest); err != nil {
+		fmt.Fprintf(os.Stderr, "backup-daily: %v\n", err)
+		return 1
+	}
+	fmt.Printf("backup-daily: wrote %s (from %s)\n", dest, dbPath)
 	return 0
 }
 

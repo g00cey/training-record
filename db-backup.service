@@ -1,8 +1,0 @@
-[Unit]
-Description=Training Record DB Backup
-After=docker.service
-
-[Service]
-Type=oneshot
-WorkingDirectory=/home/luna/src/git/github/training-record
-ExecStart=/usr/bin/make db_backup
