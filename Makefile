@@ -4,28 +4,31 @@
 .PHONY: help up dev down build logs lint test fmt clean db_backup
 
 help:
-	@echo "make up      - 本番相当構成で起動 (docker compose up --build -d)"
+	@echo "make up      - 本番相当構成 + LLM サーバー(llm/)で起動 (docker compose up --build -d)"
 	@echo "make dev     - 開発構成で起動 (compose.yaml + compose.dev.yaml, ホスト :8080)"
-	@echo "make down    - 停止・コンテナ削除"
-	@echo "make build   - 全イメージビルド"
+	@echo "make down    - 停止・コンテナ削除（LLM サーバー含む）"
+	@echo "make build   - 全イメージビルド（LLM サーバー含む）"
 	@echo "make logs    - 全サービスのログ追従"
 	@echo "make lint    - go vet + npm run lint"
 	@echo "make test    - go test ./..."
 	@echo "make fmt     - gofmt"
-	@echo "make clean   - down + training-data ボリューム削除（DB を初期化）"
+	@echo "make clean   - down + training-data ボリューム削除（DB を初期化、LLM サーバー含む）"
 	@echo "make db_backup - DB バックアップを ./backups/ に作成"
 
 up:
 	docker compose up --build -d
+	docker compose -f llm/docker-compose.yml up --build -d
 
 dev:
 	docker compose -f compose.yaml -f compose.dev.yaml up --build
 
 down:
 	docker compose down
+	docker compose -f llm/docker-compose.yml down
 
 build:
 	docker compose build
+	docker compose -f llm/docker-compose.yml build
 
 logs:
 	docker compose logs -f
@@ -42,6 +45,7 @@ fmt:
 
 clean:
 	docker compose down -v
+	docker compose -f llm/docker-compose.yml down -v
 
 db_backup:
 	@mkdir -p backups
