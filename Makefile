@@ -24,8 +24,8 @@ dev:
 	docker compose -f compose.yaml -f compose.dev.yaml up --build
 
 down:
-	docker compose down
 	docker compose -f llm/docker-compose.yml down
+	docker compose down
 
 build:
 	docker compose build
@@ -45,8 +45,8 @@ fmt:
 	cd backend && gofmt -w .
 
 clean:
-	docker compose down -v
 	docker compose -f llm/docker-compose.yml down -v
+	docker compose down -v
 
 db_backup:
 	@mkdir -p backups

@@ -143,7 +143,7 @@ COPY conf.d/ /etc/nginx/conf.d/
 | `API_KEY` | backend / frontend(runtime) | API 認証キー（必須・生成する）。frontend では Route Handler が backend 転送時に付与 |
 | `DB_PATH` | backend | 既定 `/data/training.db` |
 | `BOOTSTRAP_DB_PATH` | backend | 初回移行元。未設定/不在ならスキップ |
-| `HERMES_API_URL` | backend | スピン画像抽出（Phase 7）。Hermes Agent の抽出エンドポイント全体（例 `http://192.168.1.50:9000/extract-spin`）。未設定なら `POST /api/spin-extract` は 503（機能無効） |
+| `HERMES_API_URL` | backend | スピン画像抽出（Phase 7）。Hermes Agent の抽出エンドポイント全体。`llm/`（`spin-extraction`）は `training-record_default` ネットワークに参加しているため `http://spin-extraction:8646/extract-spin` で到達可能。別ホストの Hermes Agent を使う場合は LAN 経由の URL（例 `http://192.168.1.50:9000/extract-spin`）。未設定なら `POST /api/spin-extract` は 503（機能無効） |
 | `HERMES_API_KEY` | backend | Hermes 抽出 API の Bearer キー（Hermes Agent 側で生成・共有） |
 | `LLM_EVAL_API_URL` | backend | LLM トレーニング評価（Phase 8）。`llm/` の評価エンドポイント全体（例 `http://192.168.1.50:9000/evaluate-training`）。未設定なら `server -evaluate-training` が失敗するだけ（Web UI は動作し続ける） |
 | `LLM_EVAL_API_KEY` | backend | `llm/` 側の `TRAINING_EVAL_API_KEY` と同じ値 |
