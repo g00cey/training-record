@@ -53,6 +53,7 @@ def load_env_file():
 load_env_file()
 
 SPIN_EXTRACT_API_KEY = os.environ.get("SPIN_EXTRACT_API_KEY", "")
+TRAINING_EVAL_API_KEY = os.environ.get("TRAINING_EVAL_API_KEY", "")
 
 # ── Vision LLM へのプロンプト ─────────────────────────────────────────
 EXTRACTION_PROMPT = """あなたはスピンバイクの運動結果画面を解析する専門家です。
@@ -92,6 +93,44 @@ EXTRACTION_PROMPT = """あなたはスピンバイクの運動結果画面を解
   "freeNotes": "string",
   "uncertainFields": ["fieldName", ...]
 }"""
+
+
+# ── トレーニング評価プロンプト ────────────────────────────────────────
+EVALUATION_PERIOD_LABEL = {
+    "biweekly": "直近2週間",
+    "bimonthly": "直近8週間（約2ヶ月）",
+}
+
+EVALUATION_PROMPT_HEADER = """あなたは筋力トレーニングとスピンバイクの記録を評価する専門家です。
+以下は{period_label}のトレーニング履歴（JSON）です。この履歴をもとに評価してください。
+
+## 評価対象データ
+{history_json}
+
+## 評価ルール
+1. 頻度・ボリューム負荷の推移・ACWR（急性:慢性負荷比）・心肺負荷（TRIMP）を総合的に見る
+2. strengths（良い点）・concerns（懸念点）は事実に基づき、データから読み取れないことは書かない
+3. suggestions（提案）は具体的かつ実行可能な内容にする
+4. 断定的な医学的診断はしない（あくまでトレーニング記録の傾向分析）
+5. すべて日本語で記述する
+
+## 出力形式
+コードブロックや装飾は付けず、生の JSON のみを返してください。
+
+## JSON スキーマ
+{{
+  "summary": "string（2〜3文の総評）",
+  "strengths": ["string", ...],
+  "concerns": ["string", ...],
+  "suggestions": ["string", ...]
+}}"""
+
+
+def build_evaluation_prompt(period_type: str, history: dict) -> str:
+    """トレーニング履歴から評価用プロンプトを構築する。"""
+    period_label = EVALUATION_PERIOD_LABEL.get(period_type, period_type)
+    history_json = json.dumps(history, ensure_ascii=False, indent=2)
+    return EVALUATION_PROMPT_HEADER.format(period_label=period_label, history_json=history_json)
 
 
 # ── Vision LLM 呼び出し ──────────────────────────────────────────────
@@ -169,6 +208,80 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
         raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nContent: {content[:500]}")
 
     return extracted
+
+
+def call_text_llm(prompt: str) -> dict:
+    """OpenCode Go でテキストのみのプロンプトを評価させる（画像なし）。"""
+    api_key = os.environ.get("OPENCODE_GO_API_KEY", "")
+    if not api_key:
+        raise ValueError("OPENCODE_GO_API_KEY is not set")
+
+    model = os.environ.get("TRAINING_EVAL_MODEL", DEFAULT_MODEL)
+
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ],
+        # 評価出力（総評+3リスト×最大10件）は画像抽出より長くなりやすいため、
+        # 1024 では途中で切れて JSON が壊れることがある（本番検証で実際に発生）
+        "max_tokens": 4096,
+        "temperature": 0.1
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{OPENCODE_GO_BASE_URL}/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            # urllib のデフォルト UA (Python-urllib/x.y) は Cloudflare の
+            # Bot 対策で 403 (error code: 1010) にブロックされるため明示的に上書きする
+            "User-Agent": "spin-image-extraction/1.0",
+            # OpenCode Go はルーティング最適化のため会話ごとに安定した
+            # セッション ID を要求する。1 リクエスト = 1 会話として扱う
+            "X-OpenCode-Session": str(uuid.uuid4())
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenCode Go API error {e.code}: {body}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"OpenCode Go connection error: {e.reason}")
+
+    try:
+        content = result["choices"][0]["message"]["content"]
+    except (KeyError, IndexError):
+        raise RuntimeError(f"Unexpected API response: {json.dumps(result)[:500]}")
+
+    # content が null になることがある（max_tokens 到達前に本文を出力できなかった
+    # 場合など）。.strip() で AttributeError を起こす前に明示的なエラーにする
+    if not isinstance(content, str) or not content.strip():
+        finish_reason = result.get("choices", [{}])[0].get("finish_reason", "?")
+        raise RuntimeError(f"LLM returned empty content (finish_reason={finish_reason}): {json.dumps(result)[:500]}")
+
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        content = "\n".join(lines).strip()
+
+    try:
+        evaluated = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nContent: {content[:500]}")
+
+    return evaluated
 
 
 # ── スキーマ検証 ──────────────────────────────────────────────────────
@@ -285,6 +398,42 @@ def validate_time_format(time_str: str) -> bool:
         return False
 
 
+# ── トレーニング評価スキーマ検証 ─────────────────────────────────────
+MAX_SUMMARY_CHARS = 1000
+MAX_LIST_ITEMS = 10
+MAX_LIST_ITEM_CHARS = 200
+
+
+def _clamp_str_list(value) -> list:
+    """文字列のみを残し、件数・各文字数をキャップする。"""
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        item = item.strip()
+        if not item:
+            continue
+        out.append(item[:MAX_LIST_ITEM_CHARS])
+        if len(out) >= MAX_LIST_ITEMS:
+            break
+    return out
+
+
+def validate_and_normalize_eval(data: dict) -> dict:
+    """トレーニング評価結果をスキーマに従って正規化・検証する。"""
+    summary = data.get("summary", "")
+    if not isinstance(summary, str):
+        summary = ""
+    return {
+        "summary": summary.strip()[:MAX_SUMMARY_CHARS],
+        "strengths": _clamp_str_list(data.get("strengths", [])),
+        "concerns": _clamp_str_list(data.get("concerns", [])),
+        "suggestions": _clamp_str_list(data.get("suggestions", [])),
+    }
+
+
 # ── HTTP ハンドラ ──────────────────────────────────────────────────────
 class ExtractionHandler(BaseHTTPRequestHandler):
     """HTTP リクエストを処理するハンドラ。"""
@@ -303,10 +452,9 @@ class ExtractionHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(response.encode("utf-8"))
 
-    def check_auth(self) -> bool:
-        """Bearer token 認証を検証する。"""
-        if not SPIN_EXTRACT_API_KEY:
-            self.log_message("WARN: SPIN_EXTRACT_API_KEY is not configured")
+    def check_auth(self, expected_key: str) -> bool:
+        """Bearer token 認証を検証する。expected_key が空なら常に失敗（機能無効）。"""
+        if not expected_key:
             return False
 
         auth_header = self.headers.get("Authorization", "")
@@ -314,7 +462,7 @@ class ExtractionHandler(BaseHTTPRequestHandler):
             return False
 
         token = auth_header[7:].strip()
-        return token == SPIN_EXTRACT_API_KEY
+        return token == expected_key
 
     def do_GET(self):
         """GET リクエストを処理する。"""
@@ -328,21 +476,37 @@ class ExtractionHandler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "NotFound", "message": "Endpoint not found"})
 
     def do_POST(self):
-        """POST リクエストを処理する。"""
-        # 認証チェック
-        if not self.check_auth():
-            self.send_json(401, {
-                "error": "Unauthorized",
-                "message": "Invalid or missing Bearer token"
-            })
-            return
-
-        # パスチェック
-        if self.path != "/extract-spin":
+        """POST リクエストを処理する（パスごとに認証キー・ハンドラを振り分け）。"""
+        if self.path == "/extract-spin":
+            self._handle_extract_spin()
+        elif self.path == "/evaluate-training":
+            self._handle_evaluate_training()
+        else:
             self.send_json(404, {
                 "error": "NotFound",
                 "message": "Endpoint not found"
             })
+
+    def _auth_or_reject(self, expected_key: str) -> bool:
+        """認証チェック。キー未設定なら 503（機能無効）、不一致なら 401 を返す。"""
+        if not expected_key:
+            self.log_message("WARN: required API key is not configured for this endpoint")
+            self.send_json(503, {
+                "error": "ServiceUnavailable",
+                "message": "This endpoint is not configured on the server"
+            })
+            return False
+        if not self.check_auth(expected_key):
+            self.send_json(401, {
+                "error": "Unauthorized",
+                "message": "Invalid or missing Bearer token"
+            })
+            return False
+        return True
+
+    def _handle_extract_spin(self):
+        """POST /extract-spin: スピンバイク画像を解析する。"""
+        if not self._auth_or_reject(SPIN_EXTRACT_API_KEY):
             return
 
         # リクエストボディ読み込み
@@ -443,6 +607,86 @@ class ExtractionHandler(BaseHTTPRequestHandler):
         # 成功レスポンス
         self.send_json(200, result)
 
+    def _handle_evaluate_training(self):
+        """POST /evaluate-training: トレーニング履歴を評価する。"""
+        if not self._auth_or_reject(TRAINING_EVAL_API_KEY):
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": "Empty request body"
+            })
+            return
+
+        if content_length > 2 * 1024 * 1024:  # 2MB
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": "Request body too large (max 2MB)"
+            })
+            return
+
+        try:
+            body = self.rfile.read(content_length)
+            request_data = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": "Invalid JSON"
+            })
+            return
+
+        period_type = request_data.get("periodType")
+        if period_type not in EVALUATION_PERIOD_LABEL:
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": f"periodType must be one of {list(EVALUATION_PERIOD_LABEL)}"
+            })
+            return
+
+        prompt = build_evaluation_prompt(period_type, request_data)
+
+        start_time = time.time()
+        try:
+            self.log_message(f"Starting training evaluation ({period_type})...")
+            raw_result = call_text_llm(prompt)
+            elapsed = time.time() - start_time
+            self.log_message(f"Evaluation completed in {elapsed:.1f}s")
+        except RuntimeError as e:
+            elapsed = time.time() - start_time
+            self.log_message(f"Evaluation failed after {elapsed:.1f}s: {e}")
+            if elapsed >= TIMEOUT_SECONDS:
+                self.send_json(408, {
+                    "error": "Timeout",
+                    "message": "Training evaluation exceeded time limit"
+                })
+            else:
+                self.send_json(500, {
+                    "error": "InternalError",
+                    "message": str(e)
+                })
+            return
+        except Exception as e:
+            self.log_message(f"Unexpected error: {e}")
+            self.send_json(500, {
+                "error": "InternalError",
+                "message": f"Unexpected error: {type(e).__name__}"
+            })
+            return
+
+        try:
+            result = validate_and_normalize_eval(raw_result)
+        except Exception as e:
+            self.log_message(f"Validation error: {e}")
+            self.send_json(500, {
+                "error": "InternalError",
+                "message": f"Result validation failed: {e}"
+            })
+            return
+
+        self.send_json(200, result)
+
 
 # ── サーバ起動 ────────────────────────────────────────────────────────
 def main():
@@ -455,6 +699,9 @@ def main():
     if not os.environ.get("OPENCODE_GO_API_KEY"):
         print("ERROR: OPENCODE_GO_API_KEY is not set", file=sys.stderr)
         sys.exit(1)
+
+    if not TRAINING_EVAL_API_KEY:
+        print("WARN: TRAINING_EVAL_API_KEY is not set — POST /evaluate-training will return 503", file=sys.stderr)
 
     server = HTTPServer((HOST, PORT), ExtractionHandler)
 
@@ -473,10 +720,11 @@ def main():
     print(f"  Model: {os.environ.get('SPIN_EXTRACT_MODEL', DEFAULT_MODEL)}")
     print(f"  Provider: OpenCode Go ({OPENCODE_GO_BASE_URL})")
     print(f"  Timeout: {TIMEOUT_SECONDS}s")
-    print(f"  Auth: Bearer token (SPIN_EXTRACT_API_KEY)")
+    print(f"  Auth: Bearer token (SPIN_EXTRACT_API_KEY / TRAINING_EVAL_API_KEY)")
     print(f"\nEndpoints:")
     print(f"  GET  http://{HOST}:{PORT}/health")
     print(f"  POST http://{HOST}:{PORT}/extract-spin")
+    print(f"  POST http://{HOST}:{PORT}/evaluate-training")
     print(f"\nStarting server...")
 
     try:

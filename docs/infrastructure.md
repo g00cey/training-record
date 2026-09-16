@@ -1,6 +1,7 @@
 # インフラ設計（docker-compose）
 
 3 サービス構成: `nginx` / `frontend` / `backend`。DB は backend 内 SQLite（named volume）。
+Phase 8（LLM トレーニング評価の日次バッチ）追加時に、ジョブスケジューラ `ofelia` を4つ目のサービスとして足した。
 
 **前提（2026-09-08 確定）**: 自宅 LAN 内・外部公開なし・Web UI ログイン認証なし。
 nginx は HTTP（:80）で提供する。TLS は必須ではなく、必要なら自己署名証明書で :443 も足せる（任意）。
@@ -12,9 +13,12 @@ nginx は HTTP（:80）で提供する。TLS は必須ではなく、必要な�
 | `nginx` | 自前ビルド（`nginx:1.27-alpine` ベース） | 80 → ホスト公開（443 は任意） | `./nginx/conf.d`, TLS 証明書（任意） | frontend, backend |
 | `frontend` | 自前ビルド（Next.js standalone） | 3000（非公開） | なし | backend |
 | `backend` | 自前ビルド（`golang:1.25` → `gcr.io/distroless/static-debian12:nonroot`, CGO 無効） | 8080（非公開） | `training-data:/data` | なし |
+| `ofelia` | `mcuadros/ofelia:latest` | なし（API を持たない） | `/var/run/docker.sock:ro` | backend |
 
-- ホストに晒すのは **nginx のみ**。frontend/backend は compose ネットワーク内のみ。
+- ホストに晒すのは **nginx のみ**。frontend/backend/ofelia は compose ネットワーク内のみ。
 - `training-data` は named volume。`/data/training.db`（WAL 有効）。
+- `ofelia` は `backend` サービスの label（`ofelia.job-exec.training-evaluation.*`）を読み、
+  毎日 03:00 JST に `docker exec` で `/app/server -evaluate-training` を実行する（Phase 8）。
 
 ## ファイル構成
 
@@ -141,6 +145,9 @@ COPY conf.d/ /etc/nginx/conf.d/
 | `BOOTSTRAP_DB_PATH` | backend | 初回移行元。未設定/不在ならスキップ |
 | `HERMES_API_URL` | backend | スピン画像抽出（Phase 7）。Hermes Agent の抽出エンドポイント全体（例 `http://192.168.1.50:9000/extract-spin`）。未設定なら `POST /api/spin-extract` は 503（機能無効） |
 | `HERMES_API_KEY` | backend | Hermes 抽出 API の Bearer キー（Hermes Agent 側で生成・共有） |
+| `LLM_EVAL_API_URL` | backend | LLM トレーニング評価（Phase 8）。`llm/` の評価エンドポイント全体（例 `http://192.168.1.50:9000/evaluate-training`）。未設定なら `server -evaluate-training` が失敗するだけ（Web UI は動作し続ける） |
+| `LLM_EVAL_API_KEY` | backend | `llm/` 側の `TRAINING_EVAL_API_KEY` と同じ値 |
+| `LLM_EVAL_HISTORY_WEEKS` | backend | LLM に渡す履歴の取得範囲（週）。既定 8 |
 | `INTERNAL_API_BASE` | frontend(runtime) | Route Handler → backend `http://backend:8080/api` |
 | `NEXT_PUBLIC_API_BASE` | frontend(build) | ブラウザ用 `/bff` |
 | `TZ` | 全部 | `Asia/Tokyo` |
@@ -149,6 +156,13 @@ COPY conf.d/ /etc/nginx/conf.d/
 
 - バックアップ: `make db_backup`。backend の `server -backup <dest>` サブコマンドが `VACUUM INTO` で WAL を畳み込んだ単一ファイルを `/tmp` に書き、`docker compose cp` で `./backups/` へ取り出す（`training.db` の単純コピーでは WAL のデータを取りこぼすため）。volume 丸ごとの退避は `docker run --rm -v training-record_training-data:/d -v $PWD:/b alpine tar czf /b/backup.tgz -C /d .`
 - 定期バックアップ: systemd timer（`db-backup.timer`）で毎日 02:00 JST（17:00 UTC）に自動実行。ユニットファイルはリポジトリ直下に配置。インストール手順: `sudo cp db-backup.service db-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now db-backup.timer`。確認: `systemctl list-timers db-backup.timer`。バックアップファイルは `./backups/training_YYYYMMDD_HHMMSS.db` に保存
+- 定期トレーニング評価（Phase 8）: systemd timer は増やさず、`compose.yaml` の `ofelia` サービスが `backend` の
+  label を見て毎日 03:00 JST に `/app/server -evaluate-training` を `docker exec` する。`docker compose up -d`
+  するだけで有効になる（追加のホスト設定は不要）。確認: `docker compose logs ofelia`。手動実行・動作確認は
+  `make evaluate_training`（`docker compose exec -T backend /app/server -evaluate-training`）。
+  `ofelia` は `/var/run/docker.sock` を読み取り専用マウントするが、Docker API 自体には読み書き制限が無いため
+  実質ホストに対して強い権限を持つ。本プロジェクトは自宅 LAN 内限定・外部非公開が前提（[architecture.md](./architecture.md)）
+  のためこれを許容している
 - 初回移行のやり直し: volume 削除 → `docker compose up`（`BOOTSTRAP_DB_PATH` から再取り込み）
 - ログ: 各サービス `stdout`。集約は将来
 - CI: ホスティング未定のため当面はローカルの `make` タスク（`make lint` = `go vet` + `npm run lint`、`make test` = `go test ./...`、`make build` = `docker compose build`）。GitHub 等に載せた時点で Actions 化

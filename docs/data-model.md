@@ -83,6 +83,22 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 ### schema_migrations — マイグレーション管理（**新規**）
 | `version` INTEGER PK | `applied_at` TEXT |
 
+### training_evaluations — LLM トレーニング評価（**0003 で追加**）
+| カラム | 型 | 既定 | 用途 |
+|--------|----|------|------|
+| `id` | INTEGER PK AUTOINCREMENT | | |
+| `period_type` | TEXT NOT NULL CHECK IN ('biweekly','bimonthly') | | `biweekly`=直近2週間、`bimonthly`=直近8週間（約2ヶ月） |
+| `evaluated_at` | TEXT NOT NULL | | 評価実行時刻（RFC3339, JST） |
+| `period_from` / `period_to` | TEXT NOT NULL | | 評価対象期間（`YYYY-MM-DD`） |
+| `model` | TEXT NOT NULL | `''` | 使用した LLM モデル名（現状常に空文字） |
+| `summary` | TEXT NOT NULL | `''` | 総評（2〜3文） |
+| `details_json` | TEXT NOT NULL | `'{}'` | `{"strengths":[...],"concerns":[...],"suggestions":[...]}` |
+| `raw_response` | TEXT NOT NULL | `''` | LLM 生レスポンス（監査用。API では非公開） |
+| `created_at` | TEXT NOT NULL | `datetime('now')` | |
+
+既存の `advice` / `load-report` は毎回再計算するが、これは `server -evaluate-training`（1日1回のバッチ）
+が生成した結果を永続化する点が異なる。→ [api.md](./api.md) LLM トレーニング評価、[plan.md](./plan.md) Phase 8
+
 ## インデックス（現行踏襲）
 
 `idx_ex_name`, `idx_ex_session`, `idx_rs_date`, `idx_rs_ex`, `idx_ss_date`, `idx_spin_date`
@@ -145,4 +161,27 @@ SQL マイグレーションでは分類ロジックを持たせず、起動時 
 4. `routine_snapshots` に存在するが `presets` に無い `preset` 名があれば追加（防御的）
 
 一度全行に `preset` が付けば以降は no-op。
+
+## 0003 — LLM トレーニング評価
+
+`server -evaluate-training`（1日1回のバッチ、ofelia が自動実行）が生成する LLM 評価を保存するテーブルを追加する。スキーマのみ、データ投入ロジックは不要（バッチが書き込むだけ）。
+
+### `0003_add_training_evaluations.sql`
+```sql
+CREATE TABLE IF NOT EXISTS training_evaluations (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  period_type   TEXT NOT NULL CHECK (period_type IN ('biweekly','bimonthly')),
+  evaluated_at  TEXT NOT NULL,
+  period_from   TEXT NOT NULL,
+  period_to     TEXT NOT NULL,
+  model         TEXT NOT NULL DEFAULT '',
+  summary       TEXT NOT NULL DEFAULT '',
+  details_json  TEXT NOT NULL DEFAULT '{}',
+  raw_response  TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_evaluations_period_evaluated_at
+  ON training_evaluations(period_type, evaluated_at DESC);
+```
 </content>

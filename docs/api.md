@@ -45,6 +45,7 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 | （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
 | （新規・Phase 6） | `GET /api/advice`（skill: `advice`） |
 | （新規・Phase 7） | `POST /api/spin-extract`（スピン画像抽出・Web UI 専用） |
+| （新規・Phase 8） | `GET /api/training-evaluations/bimonthly` / `GET /api/training-evaluations/biweekly`（LLM トレーニング評価・読み取り専用） |
 
 ---
 
@@ -421,6 +422,38 @@ GET /api/advice
 - 配列（`progressiveOverload.exercises` / `watchExercises` / `warningSigns.flaggedSessions`）は常に `[]`（`null` にしない）。全トップレベルキー常時存在
 
 Hermes 側はこの JSON ＋ `references/exercise-form-guide.md` から自然文アドバイスを構成する（→ [hermes-integration.md](./hermes-integration.md) Phase 6）。
+
+### LLM トレーニング評価（Phase 8）
+
+`GET /api/advice` / `GET /api/summary/weekly` のルールベース評価とは独立の追加機能。**読み取り専用**
+（`POST` は無い）— 書き込みは `server -evaluate-training`（1日1回のバッチ、ofelia が自動実行。
+→ [infrastructure.md](./infrastructure.md)）のみが行う。評価は2種類あり、それぞれ別エンドポイント:
+
+```
+GET /api/training-evaluations/bimonthly
+→ 200（直近8週間・約2ヶ月の評価。最新1件のみ保持・表示）
+{
+  "evaluatedAt": "2026-09-17T03:00:00+09:00",
+  "periodFrom": "2026-07-23",
+  "periodTo": "2026-09-17",
+  "model": "",
+  "summary": "全体的に頻度は安定していますが、直近でACWRがやや高めです。",
+  "strengths": ["週3〜4回のペースを2ヶ月維持できている"],
+  "concerns": ["直近1週間でACWRが1.4まで上昇"],
+  "suggestions": ["来週はボリュームを2〜3割落とすデロードを検討"]
+}
+→ 404（バッチ未実行）{ "error": { "code": "not_found", "message": "..." } }
+```
+
+```
+GET /api/training-evaluations/biweekly
+→ 200（直近2週間の評価。過去10件までの履歴、evaluatedAt 降順）
+{ "evaluations": [ { ...上と同じ形 ... }, ... ] }   // バッチ未実行時は { "evaluations": [] }
+```
+
+- `strengths` / `concerns` / `suggestions` は常に配列（`null` にしない）。空配列もあり得る
+- `model` は現状常に空文字（LLM 側のレスポンスにモデル名を含めていないため）。将来 `llm/` が返すようになれば埋まる
+- 生の LLM レスポンス（`raw_response`）は監査目的で DB にのみ保存し、API では公開しない
 
 ---
 

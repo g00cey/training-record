@@ -288,3 +288,22 @@ export type Advice = {
     monitor: string[];
   };
 };
+
+// --- LLM トレーニング評価（Phase 8・日次バッチ） ---
+// GET /api/training-evaluations/bimonthly（最新1件）
+// GET /api/training-evaluations/biweekly（最新10件まで）
+
+export type TrainingEvaluation = {
+  evaluatedAt: string;
+  periodFrom: string;
+  periodTo: string;
+  model: string;
+  summary: string;
+  strengths: string[];
+  concerns: string[];
+  suggestions: string[];
+};
+
+export type TrainingEvaluationList = {
+  evaluations: TrainingEvaluation[];
+};

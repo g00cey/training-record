@@ -23,16 +23,24 @@ DB は backend コンテナ内の SQLite ファイル（named volume に永続�
                                               │
                                               ├──► SQLite (/data/training.db, volume: training-data)
                                               │
-                                              └──► Hermes Agent (POST {HERMES_API_URL}・スピン画像抽出のみ)
+                                              ├──► Hermes Agent (POST {HERMES_API_URL}・スピン画像抽出のみ)
+                                              │
+                                              └──► LLM 評価サーバ (POST {LLM_EVAL_API_URL}・日次バッチのみ、CLI から起動)
 
 Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自身が API キーを保持)
+
+ofelia (docker-compose) ──► docker exec backend /app/server -evaluate-training （毎日 03:00 JST）
 ```
 
 - frontend は backend を**直接参照しない**。ブラウザは同一オリジンの `/bff/*` のみを叩き、Next.js の Route Handler が `INTERNAL_API_BASE` + API キーで backend に中継する。
 - ブラウザ公開用のベースパスは `/bff`（`NEXT_PUBLIC_API_BASE=/bff`）。`/api` は backend 直で、キーを持つ Hermes Agent 専用。
 - この分離により API キーが意味を持つ（`/api` に到達するには キーが必須。ブラウザは `/api` を使わない）。
-- **スピン画像抽出（Phase 7）だけは逆向き**: backend が Hermes Agent の抽出 API を呼び出す
-  （`POST /api/spin-extract` → Hermes。`HERMES_API_URL` 未設定なら 503 で機能無効）。→ [api.md](./api.md) / [hermes-integration.md](./hermes-integration.md) Phase 7
+- **スピン画像抽出（Phase 7）とトレーニング評価（Phase 8）の 2 つが逆向き**:
+  - backend が Hermes Agent の抽出 API を呼び出す（`POST /api/spin-extract` → Hermes。`HERMES_API_URL`
+    未設定なら 503 で機能無効）。→ [api.md](./api.md) / [hermes-integration.md](./hermes-integration.md) Phase 7
+  - backend が `llm/` の評価 API を呼び出す（`server -evaluate-training` → `POST {LLM_EVAL_API_URL}`。
+    リクエスト系の API ハンドラではなく、ofelia が1日1回叩く CLI サブコマンドからのみ発生する）。
+    `LLM_EVAL_API_URL` 未設定ならバッチが失敗するだけで Web UI には影響しない。→ [api.md](./api.md) / [docs/plan.md](./plan.md) Phase 8
 
 ## 技術選定
 
@@ -53,7 +61,8 @@ Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自
 - **DB アクセス**: `database/sql` + `modernc.org/sqlite`（Pure Go、CGO 不要 → scratch イメージが作れる）
 - **マイグレーション**: `embed` した連番 SQL を起動時に適用する自前ランナー（`schema_migrations` テーブル管理）。→ [data-model.md](./data-model.md)
 - **レイヤ**: `handler`（HTTP） → `service`（ドメインロジック・分析計算） → `store`（SQL）
-- **設定**: 環境変数のみ（`DB_PATH`, `API_KEY`, `PORT`, `TZ`, `BOOTSTRAP_DB_PATH`, `HERMES_API_URL`, `HERMES_API_KEY`）
+- **設定**: 環境変数のみ（`DB_PATH`, `API_KEY`, `PORT`, `TZ`, `BOOTSTRAP_DB_PATH`, `HERMES_API_URL`, `HERMES_API_KEY`,
+  `LLM_EVAL_API_URL`, `LLM_EVAL_API_KEY`, `LLM_EVAL_HISTORY_WEEKS`）
 
 ### 分析ロジックの移植元
 - `skill/.hermes/skills/productivity/training-tracker/scripts/training_db.py` … CRUD・ルーティン・集計 SQL

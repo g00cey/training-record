@@ -2,8 +2,9 @@
 
 Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / `nginx` の 3 サービス Web アプリに移行する。
 
-> **状況（2026-09-10）: Phase 0〜6 実装・独立検証・移行すべて完了。Phase 7A（スピン画像登録・Web 側）実装済み・
-> モック Hermes で検証済み。Phase 7B（Hermes 側抽出 API の用意・E2E）は依頼文送付待ち。**
+> **状況（2026-09-17）: Phase 0〜6 実装・独立検証・移行すべて完了。Phase 7A（スピン画像登録・Web 側）実装済み・
+> モック Hermes で検証済み。Phase 7B（Hermes 側抽出 API の用意・E2E）は依頼文送付待ち。
+> Phase 8（LLM トレーニング評価・日次バッチ）実装済み。**
 > 以下は経緯の記録。運用カットオーバーの記録は [hermes-integration.md](./hermes-integration.md)。
 
 ## ゴール
@@ -136,6 +137,42 @@ Hermes Agent が画像から運動情報（時間・距離・平均/最大心拍
 
 **完了条件**: 実画像をアップロードしてフォームに反映・修正・保存まで通しで動くこと（7B 含む。7A 単体はモック Hermes で検証済み）
 
+### Phase 8 — LLM トレーニング評価（日次バッチ） ✅ 実装済み
+
+これまでのトレーニング履歴を LLM（`llm/` サーバー）に渡して自然言語の評価を生成し、
+DB に保存して Web UI に表示する。既存の故障予防アドバイス（Phase 6・ルールベース、毎回再計算）
+や週次サマリーの `evaluation` とは独立の追加機能。評価は2種類:
+
+- **biweekly（直近2週間）**: 過去10件まで履歴を確認可能
+- **bimonthly（直近8週間・約2ヶ月）**: 最新1件のみ
+
+- 8A（`llm/` 評価 API）:
+  - `llm/server.py` に `POST /evaluate-training` を追加（既存 `/extract-spin` と同一プロセス・ポート）。
+    `TRAINING_EVAL_API_KEY`（新規・任意キー。未設定なら 503）で認証。`periodType`（`biweekly`/`bimonthly`）
+    に応じてプロンプトを出し分け、OpenCode Go（`call_text_llm`、`call_vision_llm` と同じヘッダ/タイムアウト）
+    を呼び、`validate_and_normalize_eval` で生の LLM 出力を検証・キャップしてから返す
+- 8B（backend: 履歴取得・保存・API）:
+  - DB: `0003_add_training_evaluations.sql`（`training_evaluations` テーブル、`period_type` で2種を区別）→ [data-model.md](./data-model.md)
+  - `internal/llmeval/`: `internal/hermes` を雛形にした薄い HTTP クライアント（`Config`/`Client`/`Error`、
+    markdown フェンス対応の緩いパース、`Normalize` で二重検証）
+  - `internal/service/trainingeval.go`: `computeLoadMetricsFrom`（既存 analytics）を再利用し、8週間の履歴を
+    1回取得してから biweekly / bimonthly 2回 LLM を呼ぶ（一方が失敗してももう一方は保存する）
+  - API: `GET /api/training-evaluations/bimonthly`（最新1件、無ければ404）、
+    `GET /api/training-evaluations/biweekly`（最新10件まで）→ [api.md](./api.md)
+  - `cmd/server`: `-evaluate-training` サブコマンド（`-backup` と同じパターン）
+- 8C（frontend）:
+  - `components/TrainingEvaluationSection.tsx`: `VolumeDashboard.tsx` のボリュームのサマリー（ACWR / 週次サマリー）
+    グリッドと `AdviceCard` の間に挿入。bimonthly は単一カード、biweekly は `<details>` で展開できる履歴リスト
+- 8D（バッチ実行）:
+  - systemd timer は追加せず、`compose.yaml` に `ofelia`（Docker 向けジョブスケジューラ）サービスを追加。
+    `backend` サービスの label（`ofelia.job-exec.training-evaluation.*`）で毎日 03:00 JST に
+    `/app/server -evaluate-training` を `docker exec` 実行 → [infrastructure.md](./infrastructure.md)
+  - `make evaluate_training` で手動実行も可能（動作確認・障害時の再実行用）
+
+**完了条件**: `make evaluate_training`（または ofelia の自動実行）でバッチが走り、biweekly / bimonthly
+両方の評価が DB に保存され、`/volume` 画面に表示される。`LLM_EVAL_API_URL` 未設定時は Web UI・既存機能に
+影響を与えず、バッチのみが明確なエラーで失敗する。
+
 ## 依存関係
 
 ```
@@ -144,6 +181,9 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3
 Phase 1 ─► Phase 5（API が揃い次第）
 Phase 4 ─► Phase 6
 Phase 1 ─► Phase 7A（Web 側・モック Hermes で完結）─► Phase 7B（Hermes 側 API 用意後に E2E）
+Phase 4 ─► Phase 8B（DB + API、Phase 6 と同じ load metrics を再利用）─► Phase 8C（frontend）
+Phase 8A（llm/ 側・独立）─► Phase 8B
+Phase 8B ─► Phase 8D（バッチ実行）
 ```
 
 ## 非スコープ（今回やらない）
