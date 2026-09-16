@@ -119,6 +119,22 @@ type Profile struct {
 	MaxHrEst     int
 }
 
+// TrainingEvaluation is one LLM-generated training evaluation (Phase 8).
+// PeriodType is "biweekly" (直近2週間) or "bimonthly" (直近8週間・約2ヶ月).
+type TrainingEvaluation struct {
+	ID          int64
+	PeriodType  string
+	EvaluatedAt string
+	PeriodFrom  string
+	PeriodTo    string
+	Model       string
+	Summary     string
+	Strengths   []string
+	Concerns    []string
+	Suggestions []string
+	CreatedAt   string
+}
+
 // ---------------------------------------------------------------------------
 // Volume Load (domain.md / training_load_analysis.py)
 // ---------------------------------------------------------------------------

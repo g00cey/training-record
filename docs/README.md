@@ -29,6 +29,7 @@ Hermes 向け配布物は `hermes-skill/`。カットオーバーの記録 → [
 | Web UI のログイン認証 | **不要**（ネットワークを信頼）。ユーザ/セッション管理は作らない |
 | データ移行 | **旧 Hermes スキルは停止し、既存 `training.db` を初回に一度だけ取り込む**。再同期の仕組みは作らない |
 | git / ホスティング | **`git init` のみ**（ローカル）。GitHub 等は未定。Go module パスは仮に `training-record`。CI は当面ローカルの `make` タスク |
+| 定期バッチ実行方式（Phase 8） | **`ofelia`（Docker 向けジョブスケジューラ）を compose に追加**し label ベースで `backend` に `job-exec`。systemd timer は増やさない（`db-backup` は既存のまま） |
 
 軽微なデフォルト（指定あれば変更可）: パッケージマネージャ npm / Node 22・Go 1.23 / グラフ Recharts / カレンダー週初め 日曜 / UI 日本語のみ・単一ユーザ / 削除はハードデリート / `mlops`・LLM ファインチューニング系はスコープ外。
 </content>

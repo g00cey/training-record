@@ -81,6 +81,8 @@ func NewRouter(svc *service.Service, apiKey string, hc *hermes.Client) http.Hand
 	mux.HandleFunc("GET /api/summary/weekly", handle(h.weeklySummary))
 	mux.HandleFunc("GET /api/load-report", handle(h.loadReport))
 	mux.HandleFunc("GET /api/advice", handle(h.advice))
+	mux.HandleFunc("GET /api/training-evaluations/bimonthly", handle(h.trainingEvaluationBimonthly))
+	mux.HandleFunc("GET /api/training-evaluations/biweekly", handle(h.trainingEvaluationBiweekly))
 	mux.HandleFunc("GET /api/sessions/last", handle(h.lastSessions))
 	mux.HandleFunc("GET /api/history", handle(h.history))
 

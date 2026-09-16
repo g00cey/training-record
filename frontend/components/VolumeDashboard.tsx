@@ -15,6 +15,7 @@ import type {
 } from '@/lib/types';
 import { AcwrGauge } from './AcwrGauge';
 import { AdviceCard } from './AdviceCard';
+import { TrainingEvaluationSection } from './TrainingEvaluationSection';
 import {
   Card,
   EmptyState,
@@ -280,6 +281,8 @@ export function VolumeDashboard() {
           )}
         </Card>
       </div>
+
+      <TrainingEvaluationSection />
 
       <AdviceCard />
     </div>

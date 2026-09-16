@@ -2,12 +2,14 @@
 //
 // Usage:
 //
-//	server                 run the API server
-//	server -healthcheck    probe GET /api/health on $PORT; exit 0 iff 200
-//	server -backup <dest>  write a consistent snapshot of $DB_PATH to <dest>
+//	server                        run the API server
+//	server -healthcheck           probe GET /api/health on $PORT; exit 0 iff 200
+//	server -backup <dest>         write a consistent snapshot of $DB_PATH to <dest>
+//	server -evaluate-training     run the daily LLM training evaluation batch (biweekly + bimonthly)
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -23,6 +25,7 @@ import (
 	"training-record/internal/domain"
 	"training-record/internal/hermes"
 	"training-record/internal/httpapi"
+	"training-record/internal/llmeval"
 	"training-record/internal/service"
 	"training-record/internal/store"
 )
@@ -33,6 +36,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "-backup" || os.Args[1] == "--backup") {
 		os.Exit(runBackup(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "-evaluate-training" || os.Args[1] == "--evaluate-training") {
+		os.Exit(runEvaluateTraining())
 	}
 	if err := run(); err != nil {
 		log.Fatalf("fatal: %v", err)
@@ -81,6 +87,57 @@ func runBackup(args []string) int {
 		return 1
 	}
 	fmt.Printf("backup: wrote %s (from %s)\n", args[0], dbPath)
+	return 0
+}
+
+// runEvaluateTraining runs the daily LLM training-evaluation batch (Phase 8):
+// it gathers recent training history, asks the LLM evaluation server
+// ($LLM_EVAL_API_URL) for a biweekly and a bimonthly evaluation, and
+// persists both. Intended to be invoked once a day by an external scheduler
+// (ofelia job-exec against this container; see compose.yaml).
+func runEvaluateTraining() int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "evaluate-training: %v\n", err)
+		return 1
+	}
+	if cfg.LLMEvalURL == "" {
+		fmt.Fprintln(os.Stderr, "evaluate-training: LLM_EVAL_API_URL is not set")
+		return 1
+	}
+	domain.SetTZ(cfg.TZ)
+
+	db, err := database.Open(cfg.DBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "evaluate-training: open %q: %v\n", cfg.DBPath, err)
+		return 1
+	}
+	defer db.Close()
+	if err := database.Migrate(db, trainingrecord.MigrationsFS); err != nil {
+		fmt.Fprintf(os.Stderr, "evaluate-training: migrate: %v\n", err)
+		return 1
+	}
+
+	st := store.New(db)
+	svc := service.New(st)
+	client := llmeval.New(llmeval.Config{URL: cfg.LLMEvalURL, APIKey: cfg.LLMEvalKey})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	biweekly, bimonthly, errs := svc.RunTrainingEvaluations(ctx, client, time.Now().In(domain.JST), cfg.LLMEvalHistoryWeeks)
+	if biweekly != nil {
+		fmt.Printf("evaluate-training: saved biweekly id=%d periodTo=%s\n", biweekly.ID, biweekly.PeriodTo)
+	}
+	if bimonthly != nil {
+		fmt.Printf("evaluate-training: saved bimonthly id=%d periodTo=%s\n", bimonthly.ID, bimonthly.PeriodTo)
+	}
+	for _, e := range errs {
+		fmt.Fprintf(os.Stderr, "evaluate-training: %v\n", e)
+	}
+	if len(errs) > 0 {
+		return 1
+	}
 	return 0
 }
 

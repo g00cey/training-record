@@ -48,6 +48,10 @@ services:
       # スピン画像抽出（POST /api/spin-extract・Phase 7）。未設定なら 503（機能無効）
       HERMES_API_URL: ${HERMES_API_URL:-}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
+      # LLM トレーニング評価（server -evaluate-training・Phase 8）。未設定ならバッチ失敗
+      LLM_EVAL_API_URL: ${LLM_EVAL_API_URL:-}
+      LLM_EVAL_API_KEY: ${LLM_EVAL_API_KEY:-}
+      LLM_EVAL_HISTORY_WEEKS: ${LLM_EVAL_HISTORY_WEEKS:-8}
       TZ: Asia/Tokyo
     volumes:
       - training-data:/data
@@ -61,6 +65,25 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+    restart: unless-stopped
+    labels:
+      # ofelia（下記サービス）が1日1回 job-exec で叩く定期トレーニング評価バッチ
+      ofelia.enabled: "true"
+      ofelia.job-exec.training-evaluation.schedule: "0 0 3 * * *" # 毎日 03:00 JST
+      ofelia.job-exec.training-evaluation.command: "/app/server -evaluate-training"
+
+  # 定期トレーニング評価（Phase 8）用のジョブスケジューラ。docker.sock 経由で
+  # backend コンテナに job-exec するだけで、それ自体は API を持たない。
+  # docker.sock マウントはホストに対して強い権限を持つが、本プロジェクトは
+  # 自宅 LAN 内限定・外部非公開が前提（docs/architecture.md）のため許容している。
+  ofelia:
+    image: mcuadros/ofelia:latest
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

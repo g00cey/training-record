@@ -1,7 +1,7 @@
 # training-record — ローカル開発 / CI 相当タスク
 # ホスティング未定のため CI はこの Makefile をローカルで回す運用。
 
-.PHONY: help up dev down build logs lint test fmt clean db_backup
+.PHONY: help up dev down build logs lint test fmt clean db_backup evaluate_training
 
 help:
 	@echo "make up      - 本番相当構成 + LLM サーバー(llm/)で起動 (docker compose up --build -d)"
@@ -14,6 +14,7 @@ help:
 	@echo "make fmt     - gofmt"
 	@echo "make clean   - down + training-data ボリューム削除（DB を初期化、LLM サーバー含む）"
 	@echo "make db_backup - DB バックアップを ./backups/ に作成"
+	@echo "make evaluate_training - LLM トレーニング評価バッチを手動実行（通常は ofelia が毎日自動実行）"
 
 up:
 	docker compose up --build -d
@@ -53,3 +54,6 @@ db_backup:
 	docker compose exec -T backend /app/server -backup /tmp/training-backup.db && \
 	docker compose cp backend:/tmp/training-backup.db "$$BACKUP_FILE" && \
 	echo "バックアップを作成しました: $$BACKUP_FILE"
+
+evaluate_training:
+	docker compose exec -T backend /app/server -evaluate-training
