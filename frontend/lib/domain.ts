@@ -120,6 +120,15 @@ export type HrZoneKey = (typeof HR_ZONES)[number];
 
 export type HrZoneValues = Record<HrZoneKey, string>; // "mm:ss" or ""
 
+/** ゾーンごとの表示色（強度が上がるほど寒色→暖色）。 */
+export const HR_ZONE_COLOR: Record<HrZoneKey, string> = {
+  ウォームアップ: '#94a3b8',
+  インテンシブ: '#38bdf8',
+  有酸素: '#22c55e',
+  無酸素: '#f59e0b',
+  '最大酸素摂取量(高負荷)': '#ef4444',
+};
+
 export function emptyHrZones(): HrZoneValues {
   return HR_ZONES.reduce((acc, z) => {
     acc[z] = '';
@@ -180,6 +189,14 @@ export function composeSpinNotes(freeText: string, zones: HrZoneValues): string 
 export function isValidMmSs(v: string): boolean {
   if (!v || !v.trim()) return true;
   return /^\d{1,3}:[0-5]\d$/.test(v.trim());
+}
+
+/** "mm:ss" を秒に変換。空・不正な形式は 0。 */
+export function mmSsToSeconds(v: string | null | undefined): number {
+  if (!v) return 0;
+  const m = v.trim().match(/^(\d{1,3}):([0-5]\d)$/);
+  if (!m) return 0;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
 }
 
 // --- RPE 自動算出（表示用の目安） -----------------------------------------

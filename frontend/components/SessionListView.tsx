@@ -13,6 +13,7 @@ import type {
 import { guessKind, KIND_BADGE_CLASS, KIND_LABEL } from '@/lib/domain';
 import { longLabel } from '@/lib/date';
 import { AdviceCard } from './AdviceCard';
+import { SpinNotes } from './SpinNotes';
 import {
   Button,
   Card,
@@ -241,11 +242,10 @@ function SessionRow({ row }: { row: Row }) {
           {row.spin.maxHeartRate != null && ` / 最大 ${row.spin.maxHeartRate} bpm`}
           {row.spin.rpe != null && ` / RPE ${row.spin.rpe}`}
           {row.spin.distanceKm != null && ` / ${row.spin.distanceKm} km`}
-          {row.spin.notes && (
-            <p className="mt-1 whitespace-pre-wrap text-xs text-sky-700">
-              {row.spin.notes}
-            </p>
-          )}
+          <SpinNotes
+            notes={row.spin.notes}
+            restClassName="mt-1 whitespace-pre-wrap text-xs text-sky-700"
+          />
         </div>
       )}
     </Card>
