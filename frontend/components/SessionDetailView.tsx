@@ -5,6 +5,7 @@ import { ApiError, fetcher } from '@/lib/client';
 import type { SpinSession, StrengthSession } from '@/lib/types';
 import { guessKind, KIND_BADGE_CLASS, KIND_LABEL } from '@/lib/domain';
 import { longLabel } from '@/lib/date';
+import { SpinNotes } from './SpinNotes';
 import {
   Card,
   EmptyState,
@@ -140,11 +141,10 @@ export function SessionDetailView({ date }: { date: string }) {
               value={sp.distanceKm != null ? `${sp.distanceKm} km` : '—'}
             />
           </dl>
-          {sp.notes && (
-            <p className="mt-3 whitespace-pre-wrap text-sm text-gray-600">
-              {sp.notes}
-            </p>
-          )}
+          <SpinNotes
+            notes={sp.notes}
+            restClassName="mt-3 whitespace-pre-wrap text-sm text-gray-600"
+          />
         </Card>
       )}
     </div>
