@@ -25,12 +25,24 @@ export function CalendarView() {
     `/calendar?month=${month}`,
     fetcher,
   );
+  // グリッドには前後月のこぼれ日も表示されるので、その記録も参照できるよう前後月も取得する。
+  // 前後月の取得失敗は致命的ではないので無視（当月分だけ表示）。
+  const { data: prevData } = useSWR<CalendarResponse>(
+    `/calendar?month=${shiftMonth(month, -1)}`,
+    fetcher,
+  );
+  const { data: nextData } = useSWR<CalendarResponse>(
+    `/calendar?month=${shiftMonth(month, 1)}`,
+    fetcher,
+  );
 
   const byDate = useMemo(() => {
     const map = new Map<string, CalendarResponse['days'][number]>();
-    for (const d of data?.days ?? []) map.set(d.date, d);
+    for (const res of [prevData, data, nextData]) {
+      for (const d of res?.days ?? []) map.set(d.date, d);
+    }
     return map;
-  }, [data]);
+  }, [prevData, data, nextData]);
 
   const weeks = useMemo(() => monthGrid(month), [month]);
   const [y, m] = month.split('-');
