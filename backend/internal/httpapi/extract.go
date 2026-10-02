@@ -20,9 +20,9 @@ var allowedImageTypes = map[string]bool{
 }
 
 // spinExtract handles POST /api/spin-extract: multipart 画像 1 枚を受け取り、
-// Hermes Agent の画像抽出 API に転送して正規化済みの運動情報を返す。
-// このエンドポイントは DB に書かない（抽出結果はフロントで確認・修正して
-// POST /api/spin-sessions で保存する）。
+// 設定された画像抽出エンドポイント（HERMES_API_URL）に転送して正規化済みの
+// 運動情報を返す。このエンドポイントは DB に書かない（抽出結果はフロントで
+// 確認・修正して POST /api/spin-sessions で保存する）。
 func (h *Handlers) spinExtract(w http.ResponseWriter, r *http.Request) error {
 	if h.hermes == nil {
 		return &httpError{

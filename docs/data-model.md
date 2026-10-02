@@ -1,6 +1,6 @@
 # データモデルと移行
 
-移行元スキーマの正: `skill/.hermes/skills/productivity/training-tracker/scripts/training_db.py` の `cmd_init`。
+移行元スキーマの正: 旧 CLI スキルの `cmd_init`（4 テーブル: `strength_sessions` / `exercises` / `spin_sessions` / `routine_snapshots`）。
 Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えない）。
 
 ## テーブル定義（Web 版）
@@ -78,7 +78,7 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 | `max_hr_est` | INTEGER | 180 | TRIMP 計算 |
 | `updated_at` | TEXT | | |
 
-現行はスクリプトにハードコード（`training_load_analysis.py` の `BODYWEIGHT_KG` 等）。テーブル化して API から編集可能にする。
+現行は旧 CLI スクリプトにハードコード（`BODYWEIGHT_KG` 等）。テーブル化して API から編集可能にする。
 
 ### schema_migrations — マイグレーション管理（**新規**）
 | `version` INTEGER PK | `applied_at` TEXT |
@@ -106,7 +106,7 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 
 ## 既存データの移行
 
-移行元: `skill/.hermes/home/.hermes/training-logs/training.db`
+任意: `./bootstrap/training.db`（bind mount）が存在すれば、初回起動時のみ取り込む。
 
 | テーブル | 件数 | 期間 |
 |----------|------|------|
@@ -115,19 +115,19 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 | spin_sessions | 5 | 2026-07-11 〜 2026-07-22 |
 | routine_snapshots | 41（= 2 スナップショット: `2026-07-03` 19 種目 / `2026-07-30` 22 種目） | — |
 
-### 方式（旧スキルは停止済み前提・初回一度きり）
+### 方式（旧 CLI スキルは停止済み前提・初回一度きり）
 1. backend 起動時、`DB_PATH`（`/data/training.db`）が存在しなければ:
    - スキーマ用マイグレーションを version 1 から適用
-   - `BOOTSTRAP_DB_PATH` が設定されていて実在すれば、その SQLite から 4 テーブルを `INSERT`（`id` も維持）
+   - `./bootstrap/training.db` が存在すれば、その SQLite から 4 テーブルを `INSERT`（`id` も維持）
    - `profile` に既定行を投入
 2. 既に `DB_PATH` があれば未適用マイグレーションのみ適用（データ移行はしない）
-3. **再同期の仕組みは作らない**。旧 Hermes スキル（`training_db.py`）は Web 稼働と同時に運用停止する。
-   取り込みをやり直したい場合は `training-data` volume を削除して再起動（`BOOTSTRAP_DB_PATH` から再取り込み）。
+3. **再同期の仕組みは作らない**。
+   取り込みをやり直したい場合は `training-data` volume を削除して再起動（`./bootstrap/training.db` から再取り込み）。
 
 ### 移行スクリプト
 - `backend/cmd/migrate-legacy`（Go の小コマンド）または `make bootstrap`。
 - ソース DB は読み取り専用でオープン。種目名の表記ゆれ正規化は**この段階では行わない**（別タスク）。
-  - 既知のゆれ: `懸垂（窄握）`（実績 1 件）と `懸垂（宽握）`（ルーティン、字体は簡体 `宽`）。`SKILL.md` 本文では `窄握`/`宽握` が混在。移行時はそのまま取り込む。
+  - 既知のゆれ: `懸垂（窄握）`（実績 1 件）と `懸垂（宽握）`（ルーティン、字体は簡体 `宽`）。旧 CLI のドキュメント本文では `窄握`/`宽握` が混在。移行時はそのまま取り込む。
 
 ## スキーマ変更の方針
 

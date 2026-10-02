@@ -6,7 +6,7 @@
 |----------|------|------|------|
 | `nginx` | nginx (alpine) | ホストの :80 / :443 | 唯一の公開エンドポイント。TLS 終端、`/api`（→ backend）と `/bff`・`/`（→ frontend）の振り分け |
 | `frontend` | Next.js (App Router) + TypeScript | コンテナ内 :3000（nginx からのみ） | UI。ブラウザからは同一オリジンの `/bff/...`（Next.js Route Handler）だけを叩く。Route Handler がサーバ側で API キーを付与し backend へ転送 |
-| `backend` | Go + `net/http` (Go 1.22 `ServeMux`) | コンテナ内 :8080（nginx からのみ） | REST API。ドメインロジックと永続化。frontend と Hermes Agent の共通バックエンド |
+| `backend` | Go + `net/http` (Go 1.22 `ServeMux`) | コンテナ内 :8080（nginx からのみ） | REST API。ドメインロジックと永続化。frontend と任意の外部クライアントの共通バックエンド |
 
 DB は backend コンテナ内の SQLite ファイル（named volume に永続化）。→ [data-model.md](./data-model.md)
 
@@ -19,29 +19,29 @@ DB は backend コンテナ内の SQLite ファイル（named volume に永続�
                  │                            └─ サーバ側で Authorization: Bearer を付与
                  │                               INTERNAL_API_BASE (http://backend:8080/api) へ転送
                  │  location /bff/spin-extract ──► frontend:3000 (画像 12MB / timeout 120s のみ緩和)
-                 │  location /api/    ──► backend:8080     (Go REST API・Hermes 用)
+                 │  location /api/    ──► backend:8080     (Go REST API・外部クライアント用)
                                               │
                                               ├──► SQLite (/data/training.db, volume: training-data)
                                               │
-                                              ├──► Hermes Agent (POST {HERMES_API_URL}・スピン画像抽出のみ)
+                                              ├──► 外部画像抽出エンドポイント (POST {HERMES_API_URL}・スピン画像抽出のみ)
                                               │
                                               └──► LLM 評価サーバ (POST {LLM_EVAL_API_URL}・日次バッチのみ、CLI から起動)
 
-Hermes Agent ──► nginx :80  /api/...  ──► backend:8080   (Hermes 自身が API キーを保持)
+外部クライアント ──► nginx :80  /api/...  ──► backend:8080   (呼び出し側が API キーを保持)
 
 ofelia (docker-compose) ──► docker exec backend /app/server -evaluate-training （毎日 03:00 JST）
                         ──► docker exec backend /app/server -backup-daily        （毎日 02:00 JST）
 ```
 
 - frontend は backend を**直接参照しない**。ブラウザは同一オリジンの `/bff/*` のみを叩き、Next.js の Route Handler が `INTERNAL_API_BASE` + API キーで backend に中継する。
-- ブラウザ公開用のベースパスは `/bff`（`NEXT_PUBLIC_API_BASE=/bff`）。`/api` は backend 直で、キーを持つ Hermes Agent 専用。
+- ブラウザ公開用のベースパスは `/bff`（`NEXT_PUBLIC_API_BASE=/bff`）。`/api` は backend 直で、API キーを持つ外部クライアント専用。
 - この分離により API キーが意味を持つ（`/api` に到達するには キーが必須。ブラウザは `/api` を使わない）。
 - **スピン画像抽出（Phase 7）とトレーニング評価（Phase 8）の 2 つが逆向き**:
-  - backend が Hermes Agent の抽出 API を呼び出す（`POST /api/spin-extract` → Hermes。`HERMES_API_URL`
-    未設定なら 503 で機能無効）。→ [api.md](./api.md) / [hermes-integration.md](./hermes-integration.md) Phase 7
+  - backend が外部の画像抽出エンドポイントを呼び出す（`POST /api/spin-extract` → 抽出 API。`HERMES_API_URL`
+    未設定なら 503 で機能無効）。→ [api.md](./api.md) / [plan.md](./plan.md) Phase 7
   - backend が `llm/` の評価 API を呼び出す（`server -evaluate-training` → `POST {LLM_EVAL_API_URL}`。
     リクエスト系の API ハンドラではなく、ofelia が1日1回叩く CLI サブコマンドからのみ発生する）。
-    `LLM_EVAL_API_URL` 未設定ならバッチが失敗するだけで Web UI には影響しない。→ [api.md](./api.md) / [docs/plan.md](./plan.md) Phase 8
+    `LLM_EVAL_API_URL` 未設定ならバッチが失敗するだけで Web UI には影響しない。→ [api.md](./api.md) / [plan.md](./plan.md) Phase 8
 
 ## 技術選定
 
@@ -66,21 +66,21 @@ ofelia (docker-compose) ──► docker exec backend /app/server -evaluate-trai
   `LLM_EVAL_API_URL`, `LLM_EVAL_API_KEY`, `LLM_EVAL_HISTORY_WEEKS`）
 
 ### 分析ロジックの移植元
-- `skill/.hermes/skills/productivity/training-tracker/scripts/training_db.py` … CRUD・ルーティン・集計 SQL
-- `skill/.hermes/skills/productivity/training-tracker/scripts/training_load_analysis.py` … Volume Load / ACWR / TRIMP
-- これらを Go の `service` 層に移植する。SQL はほぼそのまま流用可。
+- 旧 CLI スキル `scripts/training_db.py` … CRUD・ルーティン・集計 SQL
+- 旧 CLI スキル `scripts/training_load_analysis.py` … Volume Load / ACWR / TRIMP
+- これらを Go の `service` 層に移植している。SQL はほぼそのまま流用可
 
 ## 認証・ネットワーク
 
 **前提: 自宅 LAN 内・外部公開なし・Web UI にログイン認証は設けない**（ネットワークを信頼）。
 
-- `/api/*` は `Authorization: Bearer <API_KEY>` を必須（`/api/health` を除く）。LAN 越しの Hermes 呼び出しに対する軽い防御（defense-in-depth）として残す
+- `/api/*` は `Authorization: Bearer <API_KEY>` を必須（`/api/health` を除く）。LAN 越しの外部クライアント呼び出しに対する軽い防御（defense-in-depth）として残す
 - ブラウザは backend を直接叩かない。フロー:
   - ブラウザ → nginx `/bff/*` → frontend の Next.js Route Handler（`app/bff/[...path]`） → `INTERNAL_API_BASE` + API キーを付与して backend
-  - Hermes Agent（別マシン） → nginx `/api/*` → backend（Hermes 自身が API キーを保持）
+  - 外部クライアント（別マシン） → nginx `/api/*` → backend（呼び出し側が API キーを保持）
 - API キーはブラウザに出さない（Next.js サーバ側の env `API_KEY` のみ）。nginx でのキー付与はしない（付与すると LAN 内の誰でも `/api` を素通しできてしまうため）
-- ブラウザ経路（`/bff`）と Hermes 経路（`/api`）を別パスにするのが要点。nginx `/api/` を frontend に向けると キーが付かず 401 になる（初回実装で踏んだ落とし穴）
-- CORS 設定は不要（frontend は同一オリジン、Hermes はサーバ間呼び出し）
+- ブラウザ経路（`/bff`）と外部クライアント経路（`/api`）を別パスにするのが要点。nginx `/api/` を frontend に向けると キーが付かず 401 になる（初回実装で踏んだ落とし穴）
+- CORS 設定は不要（frontend は同一オリジン、外部クライアントはサーバ間呼び出し）
 - TLS: 必須ではない。nginx は :80 の HTTP で提供。必要なら自己署名証明書で :443 も（→ [infrastructure.md](./infrastructure.md)）
 
 ## 環境

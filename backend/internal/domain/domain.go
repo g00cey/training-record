@@ -1,5 +1,5 @@
 // Package domain holds the shared data model and the training-analysis
-// primitives ported from the Hermes training-tracker skill
+// primitives ported from the original Python training-tracker skill
 // (scripts/training_db.py and scripts/training_load_analysis.py).
 package domain
 

@@ -4,9 +4,6 @@
 .env.*.local
 *.local
 
-# --- migration source / reference assets (kept on disk, not version-controlled) ---
-/skill/
-
 # --- dependencies ---
 node_modules/
 

@@ -48,15 +48,15 @@ func NewService(t testing.TB) (*service.Service, *store.Store) {
 }
 
 // NewRouter returns the HTTP handler wired to a fresh migrated database,
-// using apiKey for auth. The Hermes extraction client is unset (503 on
+// using apiKey for auth. The spin-image extraction client is unset (503 on
 // POST /api/spin-extract).
 func NewRouter(t testing.TB, apiKey string) (http.Handler, *store.Store) {
 	svc, st := NewService(t)
 	return httpapi.NewRouter(svc, apiKey, nil), st
 }
 
-// NewRouterWithHermes is NewRouter plus a Hermes extraction client pointed
-// at hermesURL ("" = unconfigured).
+// NewRouterWithHermes is NewRouter plus a spin-image extraction client
+// pointed at hermesURL ("" = unconfigured).
 func NewRouterWithHermes(t testing.TB, apiKey, hermesURL, hermesKey string) http.Handler {
 	t.Helper()
 	svc, _ := NewService(t)
@@ -69,32 +69,4 @@ func NewRouterWithHermes(t testing.TB, apiKey, hermesURL, hermesKey string) http
 		Timeout: 5 * time.Second,
 	})
 	return httpapi.NewRouter(svc, apiKey, hc)
-}
-
-// LegacyDBPath is the on-disk legacy training.db, relative to a test
-// package directory (backend/internal/<pkg>).
-const LegacyDBPath = "../../../skill/.hermes/home/.hermes/training-logs/training.db"
-
-// NewBootstrappedDB returns a migrated DB seeded from the legacy training.db
-// (bootstrap + preset fixup applied). The test is skipped when the legacy
-// file is not present.
-func NewBootstrappedDB(t testing.TB) *sql.DB {
-	t.Helper()
-	if _, err := os.Stat(LegacyDBPath); err != nil {
-		t.Skipf("legacy DB not present: %v", err)
-	}
-	db := NewDB(t)
-	if _, err := database.MaybeBootstrap(db, LegacyDBPath, true); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	if err := database.EnsureRoutinePresets(db); err != nil {
-		t.Fatalf("ensure presets: %v", err)
-	}
-	return db
-}
-
-// NewBootstrappedRouter is NewRouter over a bootstrapped database.
-func NewBootstrappedRouter(t testing.TB, apiKey string) (http.Handler, *store.Store) {
-	st := store.New(NewBootstrappedDB(t))
-	return httpapi.NewRouter(service.New(st), apiKey, nil), st
 }

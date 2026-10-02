@@ -29,8 +29,8 @@ var ValidUncertainFields = []string{
 }
 
 // zoneAliases maps common label variants (lower-cased, half-width parens,
-// trimmed) to canonical zone names. Hermes is asked to normalise labels
-// itself; this is defensive.
+// trimmed) to canonical zone names. The extraction endpoint is asked to
+// normalise labels itself; this is defensive.
 var zoneAliases = map[string]string{
 	// canonical / suffix variants
 	"最大酸素摂取量":      "最大酸素摂取量(高負荷)",

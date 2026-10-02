@@ -2,7 +2,7 @@
 
 // ブラウザ側のデータ取得。常に同一オリジンの /bff プロキシ（app/bff/[...path]）を叩く。
 // backend の URL も API キーもここには出てこない。
-// nginx 配下では /api/* は backend 直送（Hermes 専用）なので、ブラウザ経路は /bff に分ける。
+// nginx 配下では /api/* は backend 直送（外部クライアント専用）なので、ブラウザ経路は /bff に分ける。
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/bff';
 

@@ -1,5 +1,5 @@
 -- 0001_init.sql
--- 移行元スキーマの正: skill/.hermes/skills/productivity/training-tracker/scripts/training_db.py の cmd_init
+-- 移行元スキーマの正: 旧 CLI スキルの cmd_init
 -- Web 版はこれを踏襲し、カラム追加のみ行う（strength_sessions / spin_sessions に updated_at、profile 新規）。
 
 CREATE TABLE IF NOT EXISTS schema_migrations (

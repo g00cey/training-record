@@ -44,9 +44,9 @@ training-record/
 
 実体はリポジトリ直下:
 
-- `compose.yaml` — 本番相当。nginx(80) / frontend / backend の 3 サービス、`training-data` volume、`./skill/.../training-logs` を `/bootstrap:ro` マウント
+- `compose.yaml` — 本番相当。nginx(80) / frontend / backend の 3 サービス、`training-data` volume、`./bootstrap` を `/bootstrap:ro` マウント（`./bootstrap/training.db` が存在すれば初回のみ取り込み）
 - `compose.dev.yaml` — dev オーバーライド（バインドマウント、nginx はホスト :8081。8080 は他コンテナと競合するため）
-- `nginx/conf.d/app.conf` — `/api/` → backend（Hermes 用）、それ以外（`/bff`・`/_next`・`/`）→ frontend
+- `nginx/conf.d/app.conf` — `/api/` → backend（外部クライアント用）、それ以外（`/bff`・`/_next`・`/`）→ frontend
 
 以下は設計上の要点（実装で踏んだ落とし穴とその対処を含む）。
 
@@ -54,7 +54,7 @@ training-record/
 
 | nginx location | 転送先 | 用途 |
 |----------------|--------|------|
-| `/api/` | `backend:8080` | Hermes Agent。呼び出し側が `Authorization: Bearer` を保持 |
+| `/api/` | `backend:8080` | 外部クライアント。呼び出し側が `Authorization: Bearer` を保持 |
 | `/bff/spin-extract` | `frontend:3000` | スピン画像抽出（Phase 7）のみ。`client_max_body_size 12m` / `proxy_read_timeout 120s` と緩和（既定は 1m / 30s） |
 | `/bff/` | `frontend:3000` | ブラウザ。Next.js Route Handler `app/bff/[...path]` がサーバ側でキーを付与し backend へ中継 |
 | `/`（上記以外すべて） | `frontend:3000` | Next.js 本体・静的アセット（`/_next/...` 含む） |
@@ -144,8 +144,8 @@ COPY conf.d/ /etc/nginx/conf.d/
 | `API_KEY` | backend / frontend(runtime) | API 認証キー（必須・生成する）。frontend では Route Handler が backend 転送時に付与 |
 | `DB_PATH` | backend | 既定 `/data/training.db` |
 | `BOOTSTRAP_DB_PATH` | backend | 初回移行元。未設定/不在ならスキップ |
-| `HERMES_API_URL` | backend | スピン画像抽出（Phase 7）。Hermes Agent の抽出エンドポイント全体。`llm/`（`spin-extraction`）は `training-record_default` ネットワークに参加しているため `http://spin-extraction:8646/extract-spin` で到達可能。別ホストの Hermes Agent を使う場合は LAN 経由の URL（例 `http://192.168.1.50:9000/extract-spin`）。未設定なら `POST /api/spin-extract` は 503（機能無効） |
-| `HERMES_API_KEY` | backend | Hermes 抽出 API の Bearer キー（Hermes Agent 側で生成・共有） |
+| `HERMES_API_URL` | backend | スピン画像抽出（Phase 7）。外部の画像抽出エンドポイント URL。`llm/`（`spin-extraction`）は `training-record_default` ネットワークに参加しているため `http://spin-extraction:8646/extract-spin` で到達可能。別ホストを使う場合は LAN 経由の URL（例 `http://192.168.1.50:9000/extract-spin`）。未設定なら `POST /api/spin-extract` は 503（機能無効） |
+| `HERMES_API_KEY` | backend | スピン画像抽出エンドポイントの Bearer キー（提供側で生成・共有） |
 | `LLM_EVAL_API_URL` | backend | LLM トレーニング評価（Phase 8）。`llm/` の評価エンドポイント全体（例 `http://192.168.1.50:9000/evaluate-training`）。未設定なら `server -evaluate-training` が失敗するだけ（Web UI は動作し続ける） |
 | `LLM_EVAL_API_KEY` | backend | `llm/` 側の `TRAINING_EVAL_API_KEY` と同じ値 |
 | `LLM_EVAL_HISTORY_WEEKS` | backend | LLM に渡す履歴の取得範囲（週）。既定 8 |
