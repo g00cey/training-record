@@ -1,16 +1,16 @@
 # REST API 仕様
 
-backend が公開する API。**frontend と Hermes Agent の共通インターフェース**。
-現行 CLI（`training_db.py`）のサブコマンドを REST に再編したもの。
+backend が公開する API。**frontend と任意の外部クライアントの共通インターフェース**。
+旧 CLI スキルのサブコマンドを REST に再編したもの。
 
 ## 共通事項
 
 - ベース URL:
-  - Hermes Agent: `/api`（nginx → backend 直）。コンテナ内は `http://backend:8080/api`
+  - 外部クライアント: `/api`（nginx → backend 直）。コンテナ内は `http://backend:8080/api`
   - ブラウザ（frontend）: `/bff`（nginx → Next.js Route Handler → backend）。frontend のクライアントコードは `/bff/*` だけを叩き、キー付与はサーバ側で行う
   - エンドポイントのパス（`/strength-sessions` 等）は両者共通。以下の記載は `/api` で統一表記
 - 認証: `Authorization: Bearer <API_KEY>`（`/api/health` を除く全エンドポイント必須）。欠落/不一致は `401`
-  - frontend はブラウザから直接叩かず、Next.js サーバ側がキーを付与して backend を呼ぶ。Hermes Agent は自分でキーを保持（LAN 越し）
+  - frontend はブラウザから直接叩かず、Next.js サーバ側がキーを付与して backend を呼ぶ。外部クライアントは自分でキーを保持（LAN 越し）
   - CORS 応答は返さない（同一オリジン / サーバ間のみ想定）
 - Content-Type: `application/json; charset=utf-8`
 - 日付: `YYYY-MM-DD`（文字列）。タイムゾーンは `Asia/Tokyo`
@@ -29,7 +29,10 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 
 ### CLI → API 対応表
 
-| `training_db.py` | API |
+旧 CLI スキル `training_db.py` のサブコマンドと API の対応。CLI はもう配布しないが、
+クライアント実装者が旧サブコマンド名でアクセスできるように API 名を寄せている。
+
+| 旧 CLI `training_db.py` | API |
 |---|---|
 | `record-strength` | `POST /api/strength-sessions` / `PUT /api/strength-sessions/{date}` |
 | `record-strength --append` | `POST /api/strength-sessions/{date}/exercises` |
@@ -42,8 +45,8 @@ backend が公開する API。**frontend と Hermes Agent の共通インター�
 | `update-routine` | `PUT /api/presets/{name}` |
 | `update-exercise` | `PATCH /api/presets/{name}/exercises/{exerciseId}`（種目名ではなく `routine_snapshots.id`。追加は `POST /api/presets/{name}/exercises`） |
 | `get-exercise-list` | `GET /api/exercises` |
+| `advice` | `GET /api/advice` |
 | （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
-| （新規・Phase 6） | `GET /api/advice`（skill: `advice`） |
 | （新規・Phase 7） | `POST /api/spin-extract`（スピン画像抽出・Web UI 専用） |
 | （新規・Phase 8） | `GET /api/training-evaluations/bimonthly` / `GET /api/training-evaluations/biweekly`（LLM トレーニング評価・読み取り専用） |
 
@@ -152,9 +155,9 @@ Content-Type: multipart/form-data; boundary=...
 
 - 画像: JPEG / PNG / WebP、上限 10MB。形式はボディの実バイトから判定（ヘッダ不信）
 - **`HERMES_API_URL` 未設定なら `503 hermes_not_configured`**（機能無効・既定）
-- backend → Hermes Agent は `POST {HERMES_API_URL}`（`Authorization: Bearer {HERMES_API_KEY}`、
-  body `{"imageBase64":"...","mimeType":"image/jpeg"}`）で抽出を依頼する
-  （Hermes 側契約 → [hermes-integration.md](./hermes-integration.md) Phase 7）
+  - `HERMES_API_URL` / `HERMES_API_KEY` という名前は、スピン画像抽出のエンドポイントを指す慣用名。実体は外部の画像抽出 API で、`HERMES_API_URL` 配下の任意のホストを指定できる
+- backend は `POST {HERMES_API_URL}`（`Authorization: Bearer {HERMES_API_KEY}`、
+  body `{"imageBase64":"...","mimeType":"image/jpeg"}`）で画像抽出エンドポイントに抽出を依頼する
 - backend が応答を正規化する: ゾーン名は 5 正規名にマッピング（未知は破棄）、
   `mm:ss` 検証（不一致・範囲外は `null` 化 + `uncertainFields` 行き）、
   `avg > max` は両値保持のまま `uncertainFields` に明示
@@ -182,9 +185,9 @@ Content-Type: multipart/form-data; boundary=...
 | status | code | 意味 |
 |--------|------|------|
 | 400 | `bad_request` | 画像なし / 形式不正 / 上限超過 |
-| 502 | `hermes_unreachable` / `hermes_error` | Hermes 未到達 / Hermes がエラー・非 JSON 応答 |
+| 502 | `hermes_unreachable` / `hermes_error` | 画像抽出エンドポイント未到達 / 抽出エンドポイントがエラー・非 JSON 応答 |
 | 503 | `hermes_not_configured` | `HERMES_API_URL` 未設定（機能無効） |
-| 504 | `hermes_timeout` | Hermes が 90 秒以内に応答せず |
+| 504 | `hermes_timeout` | 画像抽出エンドポイントが 90 秒以内に応答せず |
 
 ### プリセット（名前付きメニュー）
 
@@ -251,7 +254,7 @@ POST /api/presets/自重/exercises
 
 ### ルーティン（旧・互換読み取り）
 
-`GET /api/routine` は全プリセットの最新を `sortOrder` 順に結合した読み取りビュー。Hermes 連携（Phase 5）まで残す。
+`GET /api/routine` は全プリセットの最新を `sortOrder` 順に結合した読み取りビュー。既存クライアント互換のため残す。
 
 ```
 GET /api/routine
@@ -366,7 +369,7 @@ GET /api/sessions/last
 
 ### 故障予防アドバイス（Phase 6）
 
-`SKILL.md`「故障予防アドバイス」節と `docs/domain.md` の判定ルールを集約。Web UI のアドバイスカード・Hermes の `advice` サブコマンド共用。
+旧スキルの「故障予防アドバイス」節と `docs/domain.md` の判定ルールを集約。Web UI のアドバイスカード・任意の外部クライアント共用。
 
 ```
 GET /api/advice
@@ -408,7 +411,7 @@ GET /api/advice
 ```
 
 **判定の既定（`docs/domain.md` 参照）**:
-- 痛み・違和感は `strength_sessions.notes` をキーワード（`痛`, `違和感`, `しびれ`, `痺れ`, `ロッキング`, `肉離れ`, `張り`）で**単純部分一致**。直近 28 日。`違和感なし` も `matched:["違和感"]` になる（曖昧判定は Hermes / UI 側に委譲）
+- 痛み・違和感は `strength_sessions.notes` をキーワード（`痛`, `違和感`, `しびれ`, `痺れ`, `ロッキング`, `肉離れ`, `張り`）で**単純部分一致**。直近 28 日。`違和感なし` も `matched:["違和感"]` になる（曖昧判定はクライアント実装に委譲）
 - デロード週は自動判定（週間 Volume Load が直近 4 週平均の 55% 以下）。専用フラグは持たない
 - プログレッシブオーバーロードは「週間総ボリューム比」と「種目別の前回実績比」の両方を返す
 
@@ -421,7 +424,7 @@ GET /api/advice
 - `watchExercises` / の対象は 7 断片（`ショルダープレス` `サイドレイズ` `ディップス` `スカルクラッシャー` `懸垂` `ダンベルデッドリフト` `フロントラックスクワット`）の部分一致。`ダンベルサイドレイズ` 等の複合名も拾う
 - 配列（`progressiveOverload.exercises` / `watchExercises` / `warningSigns.flaggedSessions`）は常に `[]`（`null` にしない）。全トップレベルキー常時存在
 
-Hermes 側はこの JSON ＋ `references/exercise-form-guide.md` から自然文アドバイスを構成する（→ [hermes-integration.md](./hermes-integration.md) Phase 6）。
+クライアントはこの JSON を解釈して自然文アドバイスを構成する。判定ルール・固定文言の詳細は [domain.md](./domain.md) を参照。
 
 ### LLM トレーニング評価（Phase 8）
 
@@ -485,24 +488,14 @@ JSON キーは **camelCase**。DB は snake_case（境界で変換）。リク�
 
 ## 実装で確定した挙動（2026-09-08）
 
-初回実装で docs との差分を吸収した点。テスト・Hermes 連携はこちらに合わせる。
+初回実装で docs との差分を吸収した点。テストはこちらに合わせる。
 
 - `GET /api/history?limit=` … CLI 対応表にあるがエンドポイント一覧から漏れていた。`{ "strengthSessions": [...], "spinSessions": [...] }`（`limit` 既定 10、日付降順）で実装
-- `POST /api/strength-sessions/{date}/exercises` … 対象日付が未登録なら**セッションを新規作成**して追記（現行 `--append` フォールバック準拠）。`200`、`notes` は `"; "` 連結
+- `POST /api/strength-sessions/{date}/exercises` … 対象日付が未登録なら**セッションを新規作成**して追記（旧 `--append` フォールバック準拠）。`200`、`notes` は `"; "` 連結
 - `PUT /api/strength-sessions/{date}/exercises:reorder` … `orderedIds` にそのセッションに属さない id → `422 unprocessable`
 - `GET /api/volume?exercise=` の `weight` … 記録された生の重量（自重種目は `null`）。`volumeLoad` には自重体重の代入を適用
 - カレンダー `kind` 判定 … `自重なし` / `自重無し` を除去してから `自重` 部分一致を見る（「（自重なし）」を `bodyweight_and_fw` に誤分類しない）
 - エラーコード … 構造・フォーマット不正 → `bad_request`(400)、意味的なフィールド不正（`reps` 欠落・`rpe` が 1–10 外）→ `unprocessable`(422)。不明ルート → JSON の `not_found`
 - タイムスタンプ … アプリ書き込み分は RFC3339 `+09:00`。レガシー `YYYY-MM-DD HH:MM:SS`(UTC) は読み取り時に変換
 - 丸め … `volumeLoad` と load-report 合計は整数、`acwr` 2 桁、`spinTrimp` / `volumeLoadPerBw` / `bmi` 1 桁
-
-## Hermes Agent 側の移行（Phase 5・実装済み）
-
-旧スキルの `python3 training_db.py <cmd>`（ローカル SQLite 直）を、この API を叩く新スキルに置き換えた。
-
-- 新スキル一式: [`hermes-skill/training-tracker/`](../hermes-skill/training-tracker/)
-  （`SKILL.md` v2.0.0 + `scripts/training_api.py` + `references/`）
-- `training_api.py` は Python 標準ライブラリ（`urllib`）のみ。旧 `training_db.py` とサブコマンド名・引数を極力維持
-- Hermes 環境の環境変数: `TRAINING_API_BASE`（例 `http://192.168.1.50/api`）/ `TRAINING_API_KEY`（backend の `API_KEY` と同値）
-- **Hermes Agent への具体的な修正依頼文・カットオーバー手順・サブコマンド対応表 → [hermes-integration.md](./hermes-integration.md)**
 </content>

@@ -24,8 +24,8 @@ services:
     volumes:
       - ./backend:/src
       - go-mod-cache:/go/pkg/mod
-    # bootstrap 元 (skill/ の training.db) は compose.yaml の
-    # ./skill/...:/bootstrap:ro をそのまま継承する。
+    # bootstrap 元 (./bootstrap/training.db) は compose.yaml の
+    # ./bootstrap:/bootstrap:ro をそのまま継承する。
 
   nginx:
     ports:

@@ -65,7 +65,7 @@ function extractErrorMessage(e: unknown): string {
       case 'hermes_timeout':
         return '解析がタイムアウトしました。しばらく待って再試行するか、手入力してください';
       case 'hermes_unreachable':
-        return 'Hermes Agent に接続できませんでした。Hermes 側の起動を確認してください';
+        return '画像抽出エンドポイントに接続できませんでした。設定（HERMES_API_URL）と抽出サーバーの起動を確認してください';
       case 'hermes_error':
         return e.message;
       default:
@@ -325,7 +325,7 @@ export function SpinSessionForm({
           <h3 className="font-semibold text-gray-800">画像から入力（任意）</h3>
           <p className="text-xs text-gray-500">
             スピンバイクの運動結果（アプリのスクリーンショット等）をアップロードすると、
-            Hermes Agent が時間・心拍・心拍ゾーン内訳などを読み取り、このフォームに反映します。
+            画像抽出エンドポイントが時間・心拍・心拍ゾーン内訳などを読み取り、このフォームに反映します。
             解析には数十秒かかることがあります。画像は保存されません（抽出結果のみ登録）。
           </p>
           <div className="flex flex-wrap items-center gap-3">
@@ -359,7 +359,7 @@ export function SpinSessionForm({
             />
           )}
           {extracting && (
-            <Spinner label="Hermes Agent が画像を解析中です…（数十秒かかることがあります）" />
+            <Spinner label="画像を解析中です…（数十秒かかることがあります）" />
           )}
           {extractError && <Toast kind="error">{extractError}</Toast>}
           {extractInfo && <Toast kind="info">{extractInfo}</Toast>}

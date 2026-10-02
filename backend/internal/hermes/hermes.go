@@ -1,8 +1,8 @@
-// Package hermes is a thin HTTP client for the Hermes Agent image-extraction
-// API used by POST /api/spin-extract (Phase 7). Hermes Agent receives a spin
-// bike workout screenshot and returns structured exercise data as JSON.
+// Package hermes is a thin HTTP client for the spin-image extraction endpoint
+// used by POST /api/spin-extract (Phase 7). The endpoint receives a spin-bike
+// workout screenshot and returns structured exercise data as JSON.
 //
-// 契約（docs/hermes-integration.md Phase 7 の依頼文と同じ）:
+// 契約:
 //
 //	POST {HERMES_API_URL}
 //	Authorization: Bearer {HERMES_API_KEY}

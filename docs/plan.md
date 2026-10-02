@@ -1,17 +1,17 @@
 # Web アプリ化プラン
 
-Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / `nginx` の 3 サービス Web アプリに移行する。
+旧来の CLI スキル（ローカル SQLite を直接操作する Python スクリプト）を、
+`frontend`(Next.js) / `backend`(Go) / `nginx` の 3 サービス Web アプリに移行する。
 
 > **状況（2026-09-17）: Phase 0〜6 実装・独立検証・移行すべて完了。Phase 7A（スピン画像登録・Web 側）実装済み・
-> モック Hermes で検証済み。Phase 7B（Hermes 側抽出 API の用意・E2E）は依頼文送付待ち。
 > Phase 8（LLM トレーニング評価・日次バッチ）実装済み。**
-> 以下は経緯の記録。運用カットオーバーの記録は [hermes-integration.md](./hermes-integration.md)。
+> 以下は経緯の記録。
 
 ## ゴール
 
-- 現行スキルの記録・ルーティン・集計機能を Web UI で操作できる
-- Hermes Agent は CLI ではなく backend の HTTP API 経由で記録・参照する
-- `docker compose up` で一式立ち上がり、既存 `training.db` を初回に取り込む
+- 旧 CLI スキルの記録・ルーティン・集計機能を Web UI で操作できる
+- 任意の外部クライアントは backend の REST API 経由で記録・参照できる
+- `docker compose up` で一式立ち上がり、既存 SQLite が `./bootstrap/training.db` にあれば初回に取り込む
 
 ## スコープ（memo より）
 
@@ -23,7 +23,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 | 4 | カレンダー表示 | `GET /api/calendar` + 月グリッド |
 | 5 | ボリュームのグラフ表示 | `GET /api/volume` + Recharts |
 | 6 | インフラ（docker-compose） | [infrastructure.md](./infrastructure.md) |
-| 7 | Hermes 連携 API | [api.md](./api.md) 全体 + 認証 |
+| 7 | 外部クライアント向け API | [api.md](./api.md) 全体 + 認証 |
 
 ## フェーズ分割
 
@@ -41,14 +41,14 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 ### Phase 1 — backend コア（データ層 + 記録 API） ✅ 実装済み・検証済み
 - マイグレーションランナー（`embed` SQL + `schema_migrations`）
 - スキーマ `0001_init.sql`（4 テーブル + `profile` + インデックス）→ [data-model.md](./data-model.md)
-- 初回ブートストラップ: `BOOTSTRAP_DB_PATH` から既存 `training.db` を取り込み
-- store 層（SQL、`training_db.py` の SQL を移植）
+- 初回ブートストラップ: `BOOTSTRAP_DB_PATH` から既存 SQLite を取り込み（無ければ空から開始）
+- store 層（SQL、旧 CLI のスキーマを移植）
 - API: 筋トレセッション CRUD + 種目編集/並べ替え/追記、スピンセッション CRUD
 - API: `GET /api/exercises`, `GET /api/sessions/last`
 - API キー認証ミドルウェア
 - backend のテスト（store / handler）
 
-**完了条件**: `curl` で記録の作成・取得・更新・削除ができ、既存 36 セッションが移行済み
+**完了条件**: `curl` で記録の作成・取得・更新・削除ができ、既存データの取り込み（任意）が完了している
 
 ### Phase 2 — frontend コア（一覧 + 記録フォーム + ルーティン） ✅ 実装済み・検証済み
 - API クライアント（`fetch` ラッパ + SWR）、SSR は `INTERNAL_API_BASE`
@@ -69,7 +69,7 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 **完了条件**: カレンダーで実施日と種別が一目でわかり、日付から記録詳細に飛べる
 
 ### Phase 4 — ボリュームグラフ + 集計 ✅ 実装済み・検証済み
-- service 層に Volume Load / TRIMP / ACWR を移植（`training_load_analysis.py`）→ [domain.md](./domain.md)
+- service 層に Volume Load / TRIMP / ACWR を移植（解析ロジックは旧 Python 実装に由来）→ [domain.md](./domain.md)
 - API: `GET /api/volume`（session / week / 種目別）, `GET /api/summary`, `GET /api/summary/weekly`, `GET /api/load-report`
 - API: `GET/PUT /api/profile`
 - frontend: ボリューム推移グラフ（セッション別 / 週別切替）、種目別推移グラフ、ACWR ゲージ、週次サマリーカード
@@ -90,38 +90,40 @@ Hermes スキル `training-tracker` を、`frontend`(Next.js) / `backend`(Go) / 
 
 **完了条件**: 記録フォームで自重・FW を個別/複合で選べ、加算・除去が仕様どおり動く。既存ルーティンが自重/FW 2 プリセットに分割移行されている
 
-### Phase 5 — Hermes 連携 ✅ 実装済み
-- 新スキル一式 `hermes-skill/training-tracker/`（`SKILL.md` v2.0.0 + `scripts/training_api.py` + `references/`）
-- `training_api.py`: Python stdlib（`urllib`）のみ。旧 `training_db.py` とサブコマンド互換。
-  `record-strength` / `record-spin` / `get-history` / `last-session` / `summary` / `weekly-summary` /
-  `load-report` / `get-exercise-list` / `get-routine` / `show-routine` / `get-presets` / `show-preset` /
-  `update-preset` / `update-exercise` / `add-exercise` / `health`
-- 環境変数 `TRAINING_API_BASE` / `TRAINING_API_KEY`。`init` は廃止（サーバ管理）→ `health`
-- 旧 `training_db.py` は `skill/` 配下に不変で残置
-- Hermes への修正依頼文・カットオーバー手順・対応表 → [hermes-integration.md](./hermes-integration.md)
+### Phase 5 — 外部クライアント向け REST API 整備 ✅ 実装済み
 
-**完了条件**: Hermes Agent が API 経由で記録・参照・プリセット更新を完結できる（`training_api.py` を稼働中スタックで疎通確認済み）
+旧 CLI スキルの代わりに、外部クライアントから backend を呼び出せる REST API を整備する。
+この API は frontend と共用で、`/api/*` 配下に認証付きで公開する。
 
-### Phase 6 — 故障予防アドバイス（任意）✅ 実装済み・検証済み（Hermes 側 `advice` サブコマンド組み込みも完了）
+- 認証: 静的 API キー（`Authorization: Bearer`）。`/api/health` のみ認証不要
+- エンドポイント: [api.md](./api.md) 全体。`/api/strength-sessions` / `/api/spin-sessions` /
+  `/api/presets` / `/api/calendar` / `/api/volume` / `/api/summary` / `/api/load-report` /
+  `/api/profile` / `/api/exercises` / `/api/advice` 等
+- 旧 CLI のサブコマンド名（`record-strength` / `record-spin` / `get-history` / `last-session` /
+  `summary` / `weekly-summary` / `load-report` / `get-exercise-list` / `get-routine` / `show-routine` /
+  `get-presets` / `show-preset` / `update-preset` / `update-exercise` / `add-exercise`）と API の対応表 →
+  [api.md](./api.md)「CLI → API 対応表」
+- nginx ルーティング: `/api/*` を backend 直、ブラウザは `/bff/*`（Next.js Route Handler）経由
+
+**完了条件**: 任意のクライアントが API 経由で記録・参照・プリセット更新を完結できる
+
+### Phase 6 — 故障予防アドバイス（任意）✅ 実装済み・検証済み
 - backend: `GET /api/advice` — プログレッシブオーバーロード（週間VL比 + 種目別前回比）/ 頻度チェック（直近14日）/
-  デロード自動判定（週間VLが直近4週平均の55%以下）/ 要チェック6種目の増量検知 / 警告サイン（notes パース）を集約。
-  `service` 層に判定を集約、Web UI と Hermes `advice` サブコマンドで共用。→ [api.md](./api.md) / [domain.md](./domain.md)
+  デロード自動判定（週間VLが直近4週平均の55%以下）/ 要チェック種目の増量検知 / 警告サイン（notes パース）を集約。
+  `service` 層に判定を集約、Web UI と共用。→ [api.md](./api.md) / [domain.md](./domain.md)
 - frontend: アドバイスカード（ダッシュボード / ボリューム画面。ACWR ゲージの近く）。
   ACWR ゾーン・頻度ステータス・過負荷ステータス・デロード due バナー・要チェック種目・警告サイン flag を表示
-- hermes-skill: `training_api.py` に `advice` サブコマンド（薄いラッパ）。SKILL.md のアドバイス手順を `advice` 結果ベースに
 - 判定の既定: 痛み=notes パース / デロード=自動判定（専用フラグなし）/ 過負荷=週間比と種目別比の両方
-- 出典: `SKILL.md` 故障予防アドバイス節、`references/`
-- Hermes 側への依頼文 → [hermes-integration.md](./hermes-integration.md) Phase 6
 
-### Phase 7 — スピンバイクの画像登録（Hermes Agent 画像抽出連携）
+### Phase 7 — スピンバイクの画像登録（外部画像抽出エンドポイント連携）
 
 スピンバイクの運動結果画面（スクリーンショット等）を Web UI からアップロードすると、
-Hermes Agent が画像から運動情報（時間・距離・平均/最大心拍・心拍ゾーン内訳）を抽出し、
+外部の画像抽出エンドポイントが運動情報（時間・距離・平均/最大心拍・心拍ゾーン内訳）を抽出し、
 スピン記録フォームに自動入力する。**抽出と保存を分離**（抽出結果はユーザーが確認・修正してから
 既存 `POST /api/spin-sessions` で保存。OCR 誤読対策）。画像は一時利用のみで保存しない。
 
 - 7A（Web 側・モックで完結可能）✅ 実装済み:
-  - backend: `internal/hermes`（Hermes 抽出 API クライアント + 応答の正規化: ゾーン名 5 正規名へのマッピング /
+  - backend: `internal/hermes`（画像抽出 API クライアント + 応答の正規化: ゾーン名 5 正規名へのマッピング /
     `mm:ss` 検証 / 範囲チェック / `uncertainFields` 生成。camel/snake 両キー・コードフェンス防御的パース）
   - backend: `POST /api/spin-extract`（multipart `image`、JPEG/PNG/WebP・10MB 上限・実バイト形式判定・
     `HERMES_API_URL` 未設定なら 503。エラー `hermes_not_configured` / `hermes_unreachable` / `hermes_error` / `hermes_timeout`）。→ [api.md](./api.md)
@@ -129,13 +131,9 @@ Hermes Agent が画像から運動情報（時間・距離・平均/最大心拍
   - compose / `.env.example`: `HERMES_API_URL` / `HERMES_API_KEY`（任意・未設定なら機能無効）
   - frontend: スピン新規登録フォームに「画像から入力」カード（ファイル選択・プレビュー・解析中 Spinner・
     結果の自動反映 + 不確実項目の警告・エラー種別ごとのメッセージ）。`apiUpload`（multipart）を追加
-  - テスト: hermes パッケ（ラウンドトリップ・snake_case・フェンス・タイムアウト・正規化）+ httpapi（ハンドラ全ケースを httptest モックで）
-- 7B（Hermes 側・依頼文送付後）⏳ 未実施:
-  - [hermes-integration.md](./hermes-integration.md) Phase 7 の依頼文を Hermes Agent に送付 →
-    画像抽出 API（`POST {HERMES_API_URL}`）を用意してもらう
-  - URL / キーを共有してもらい `.env` に設定 → 実画像で E2E 確認（画像 → 自動入力 → 修正 → 保存 → 一覧反映）
+  - テスト: 抽出クライアント（ラウンドトリップ・snake_case・フェンス・タイムアウト・正規化）+ httpapi（ハンドラ全ケースを httptest モックで）
 
-**完了条件**: 実画像をアップロードしてフォームに反映・修正・保存まで通しで動くこと（7B 含む。7A 単体はモック Hermes で検証済み）
+**完了条件**: 画像抽出エンドポイントを `.env` の `HERMES_API_URL` / `HERMES_API_KEY` に設定して、アップロード・自動入力・修正・保存・一覧反映まで通しで動くこと
 
 ### Phase 8 — LLM トレーニング評価（日次バッチ） ✅ 実装済み
 
@@ -180,7 +178,7 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3
                     └─► Phase 4 ─► (グラフは Phase 2 の後ならいつでも)
 Phase 1 ─► Phase 5（API が揃い次第）
 Phase 4 ─► Phase 6
-Phase 1 ─► Phase 7A（Web 側・モック Hermes で完結）─► Phase 7B（Hermes 側 API 用意後に E2E）
+Phase 1 ─► Phase 7A（Web 側・モック抽出エンドポイントで完結）─► Phase 7B（外部抽出 API 用意後に E2E）
 Phase 4 ─► Phase 8B（DB + API、Phase 6 と同じ load metrics を再利用）─► Phase 8C（frontend）
 Phase 8A（llm/ 側・独立）─► Phase 8B
 Phase 8B ─► Phase 8D（バッチ実行）
@@ -190,7 +188,7 @@ Phase 8B ─► Phase 8D（バッチ実行）
 
 - マルチユーザ / 本格認証 / Web UI のログイン（単一ユーザ・LAN 内前提）
 - 外部公開 / Let's Encrypt（LAN 内 HTTP。自己署名 TLS は任意で足せる程度）
-- 旧 Hermes スキルとの併用・データ再同期（旧スキルは停止、初回一度きり取り込み）
+- 旧 CLI スキルとの併用・データ再同期（旧 CLI は停止、初回一度きり取り込み）
 - モバイルアプリ
 - 種目名マスタの正規化（表記ゆれ一括修正）— 別タスク
 - Postgres 移行 — SQLite で始める。必要になったら `db` サービス追加を検討

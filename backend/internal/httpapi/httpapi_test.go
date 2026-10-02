@@ -686,7 +686,7 @@ func urlSeg(s string) string {
 }
 
 func TestAdviceEndpoint(t *testing.T) {
-	h, _ := testsupport.NewBootstrappedRouter(t, key)
+	h, _ := testsupport.NewRouter(t, key)
 	c := &client{t: t, h: h}
 
 	// auth required

@@ -1,7 +1,5 @@
 # ドメイン用語・分析ロジック・落とし穴
 
-移行元: `skill/.hermes/skills/productivity/training-tracker/`（`SKILL.md`, `scripts/`, `references/`）
-
 ## 用語集
 
 | 用語 | 意味 |
@@ -22,7 +20,7 @@
 
 ## Volume Load 計算
 
-`training_load_analysis.py` の移植。
+旧 CLI の解析スクリプトを移植。
 
 - 通常種目: `weight × reps × sets`
 - 自重種目: `weight` が `null` の場合、**自重種目リストに含まれるなら `profile.bodyweightKg`** を、含まれないなら `0` を weight とみなす
@@ -31,7 +29,7 @@
   - ※ `腕立て伏せ` `自重スクワット` `懸垂（宽握）` は現行リストに**入っていない**（= Volume Load 0 扱い）。
     Web 版で見直すかは要検討（`domain.md` の TODO）。当面は現行踏襲。
 
-## ACWR ゾーン判定（`training_load_analysis.py`）
+## ACWR ゾーン判定（解析スクリプト由来）
 
 | ACWR | ゾーン | 対応 |
 |------|--------|------|
@@ -60,7 +58,7 @@
   backend がゾーン名の表記ゆれ（全角括弧・Zone 1–5・英語表記等）をこの正規名にマッピングしてから
   フロントに返す（`backend/internal/hermes/normalize.go`）
 
-## 故障予防アドバイス（Phase 6・出典: `SKILL.md`）
+## 故障予防アドバイス（Phase 6）
 
 `GET /api/advice` が返す判定ルール（→ [api.md](./api.md) レスポンス形）:
 
@@ -73,15 +71,15 @@
   - 連続日で間隔 24h 未満あり → `rest_needed`
   - 直近 14 日ゼロ → `long_off`（再開は減量スタート）
 - **デロード**: 週間 Volume Load が直近 4 週平均の 55% 以下の週を「デロード週」と自動判定。最後のデロードから 5 週以上（または一度も無し）で `due: true`。専用フラグは持たない
-- **要チェック種目**（固定 6 種目・リスク高い順）: ショルダープレス / サイドレイズ → ディップス → スカルクラッシャー → 懸垂 → ダンベルデッドリフト → フロントラックスクワット。直近セッションでこれらの重量が前回より上がっていたら `watchExercises` に載せ、`formGuideAnchor` で `references/exercise-form-guide.md` の該当種目を指す
-- **警告サイン**: `strength_sessions.notes` を痛みキーワード（`痛` / `違和感` / `しびれ` / `ロッキング` / `肉離れ` / `張り` 等）でパース。直近 28 日で該当したセッションを `flaggedSessions` に。`stopNow` / `monitor` の定型チェックリストも返す
-- 詳細フォームは `references/exercise-form-guide.md`、筋群別頻度・ボリューム戦略は `references/split-routine-analysis.md`
+- **要チェック種目**（固定 6 種目・リスク高い順）: ショルダープレス / サイドレイズ → ディップス → スカルクラッシャー → 懸垂 → ダンベルデッドリフト → フロントラックスクワット。直近セッションでこれらの重量が前回より上がっていたら `watchExercises` に載せ、`formGuideAnchor` でフォームガイド（旧 `SKILL.md` / `references/exercise-form-guide.md` 由来）の該当種目を指す
+- **警告サイン**: `strength_sessions.notes` を痛みキーワード（`痛` / `違和感` / `しびれ` / `痺れ` / `ロッキング` / `肉離れ` / `張り` 等）でパース。直近 28 日で該当したセッションを `flaggedSessions` に。`stopNow` / `monitor` の定型チェックリストも返す
+- 判定は JSON を返すのみで、自然文の組み立て・トーン調整はクライアント実装に委ねる
 
-判定ロジックは backend の `service` 層に集約し、Web UI のアドバイスカードと Hermes の `advice` サブコマンドが共用する。自然文への変換（フォーム指導の引用・トーン調整）は Hermes 側。
+判定ロジックは backend の `service` 層に集約し、Web UI のアドバイスカードと任意の外部クライアントが共用する。
 
-## 落とし穴（`SKILL.md` Common Pitfalls ＋ Web 化の注意）
+## 落とし穴（旧スキルの Common Pitfalls ＋ Web 化の注意）
 
-1. **同一日付は 1 セッション**。現行 CLI は `INSERT OR REPLACE`（上書き）。API では `POST`=新規(409)/`PUT`=置換/`POST .../exercises`=追記 に分離。UI でも「置換」か「追記」かを明示。
+1. **同一日付は 1 セッション**。旧 CLI は `INSERT OR REPLACE`（上書き）。API では `POST`=新規(409)/`PUT`=置換/`POST .../exercises`=追記 に分離。UI でも「置換」か「追記」かを明示。
 2. **ルーティンと実績は別テーブル・別操作**。record 系にルーティン情報を混ぜない。
 3. **自重種目の `weight` は `null`**（`0` ではない）。フォームのデフォルト値・バリデーションに注意。
 4. **日本語種目名の表記ゆれ**。`GET /api/exercises` の既存名に寄せる。オートコンプリート必須。将来は種目マスタ化。
@@ -89,7 +87,7 @@
 6. **同名種目の複数エントリ**（「懸垂 10r」「懸垂 6r」）は独立行として保持・表示。1 行にまとめない。各エントリは `routine_snapshots.id` で個別識別・更新可能。
 7. **プリセットは `(preset, date)` 単位のスナップショット**。各プリセットの最新 `date` が「現在」。
    - `PUT /api/presets/{name}`（全体更新）: 新しい `date`（既定は今日）でそのプリセットのスナップショットを積み直す（履歴 +1）。
-   - `PATCH /api/presets/{name}/exercises/{exerciseId}`（単一種目）: **最新スナップショットを in-place 更新**（現行 `cmd_update_exercise` 準拠。履歴は増やさない）。`exerciseId` で個別指定するため、同名種目が複数ある場合でも個別に更新可能。
+   - `PATCH /api/presets/{name}/exercises/{exerciseId}`（単一種目）: **最新スナップショットを in-place 更新**（旧 `cmd_update_exercise` 準拠。履歴は増やさない）。`exerciseId` で個別指定するため、同名種目が複数ある場合でも個別に更新可能。
    - 旧 `/api/routine` は全プリセット結合の読み取り互換ビュー。書き込みは `/api/presets/*` に一本化。
 8. **プリセット分割の基準**: 移行 fixup は `weight IS NULL` を「自重」、それ以外を「FW」に振り分ける（Volume Load の自重種目セットとは別基準。あちらは体重代入の可否、こちらはメニュー区分）。
 9. **記録フォームの加算選択**: プリセット ON で種目を選択順に追記、OFF でそのプリセット由来の未編集行だけ除去。ユーザーが編集/追加した行は残す（行ごとに `sourcePreset` を持ち、編集で外れる）。

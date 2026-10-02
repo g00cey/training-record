@@ -11,9 +11,10 @@ import (
 // ---------------------------------------------------------------------------
 // GET /api/advice  (Phase 6 injury-prevention advice)
 //
-// Aggregates the SKILL.md / docs/domain.md rules into one payload shared by
-// the Web UI advice card and the Hermes `advice` subcommand. Natural-language
-// phrasing / form-guide quoting happens on the Hermes side.
+// Aggregates the injury-prevention rules (see docs/domain.md, derived from the
+// original skill's failure-prevention guidance and references) into one JSON
+// payload shared by the Web UI advice card and any external client. Natural-
+// language phrasing and form-guide quoting are the client's responsibility.
 // ---------------------------------------------------------------------------
 
 // AdviceACWR is the acute:chronic load ratio block (same maths as load-report).

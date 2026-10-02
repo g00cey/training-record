@@ -42,7 +42,7 @@ services:
     environment:
       PORT: "8080"
       DB_PATH: /data/training.db
-      # 初回のみ: 既存 training.db をここから一度だけ取り込む。無ければスキップ
+      # 任意: ホストの ./bootstrap/training.db が存在すれば初回のみ取り込む（無ければ無視）
       BOOTSTRAP_DB_PATH: /bootstrap/training.db
       API_KEY: ${API_KEY:?set API_KEY in .env}
       # スピン画像抽出（POST /api/spin-extract・Phase 7）。未設定なら 503（機能無効）
@@ -55,7 +55,9 @@ services:
       TZ: Asia/Tokyo
     volumes:
       - training-data:/data
-      - ./skill/.hermes/home/.hermes/training-logs:/bootstrap:ro
+      # 任意: ホストの ./bootstrap/training.db が存在すれば初回起動時のみ取り込む。
+      # 移行済みで不要なら ./bootstrap/ を空のままにしておくだけで良い
+      - ./bootstrap:/bootstrap:ro
       # 定期バックアップ（ofelia job-exec が -backup-daily で書き込む）の出力先。
       # ホストに直接マウントしているので docker compose cp は不要
       - ./backups:/backups
