@@ -147,7 +147,7 @@ DB に保存して Web UI に表示する。既存の故障予防アドバイス
 - 8A（`llm/` 評価 API）:
   - `llm/server.py` に `POST /evaluate-training` を追加（既存 `/extract-spin` と同一プロセス・ポート）。
     `TRAINING_EVAL_API_KEY`（新規・任意キー。未設定なら 503）で認証。`periodType`（`biweekly`/`bimonthly`）
-    に応じてプロンプトを出し分け、OpenCode Go（`call_text_llm`、`call_vision_llm` と同じヘッダ/タイムアウト）
+    に応じてプロンプトを出し分け、Lemonade Server（`call_text_llm`、`call_vision_llm` と同じヘッダ/タイムアウト）
     を呼び、`validate_and_normalize_eval` で生の LLM 出力を検証・キャップしてから返す
 - 8B（backend: 履歴取得・保存・API）:
   - DB: `0003_add_training_evaluations.sql`（`training_evaluations` テーブル、`period_type` で2種を区別）→ [data-model.md](./data-model.md)

@@ -17,21 +17,26 @@ import os
 import signal
 import sys
 import time
+import io
 import urllib.error
 import urllib.request
-import uuid
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Optional
+
+try:
+    from PIL import Image, ImageOps
+except ImportError:  # Pillow が無い環境では縮小せず原寸のまま送る
+    Image = None
 
 # ── 設定 ───────────────────────────────────────────────────────────────
 PORT = int(os.environ.get("SPIN_EXTRACT_PORT", 8646))
 HOST = os.environ.get("SPIN_EXTRACT_HOST", "0.0.0.0")
 TIMEOUT_SECONDS = 90
 
-# OpenCode Go の mimo-v2.5 を使用
-DEFAULT_MODEL = "mimo-v2.5"
-OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
+# Lemonade Server（OpenAI 互換 API）の Gemma-4-12B-it-MTP-GGUF（llama.cpp）を使用
+DEFAULT_MODEL = "Gemma-4-12B-it-MTP-GGUF"
+LEMONADE_BASE_URL = os.environ.get("LEMONADE_BASE_URL", "http://172.16.1.20:13305/api/v1").rstrip("/")
 
 # ── 環境変数読み込み ──────────────────────────────────────────────────
 def load_env_file():
@@ -56,43 +61,21 @@ SPIN_EXTRACT_API_KEY = os.environ.get("SPIN_EXTRACT_API_KEY", "")
 TRAINING_EVAL_API_KEY = os.environ.get("TRAINING_EVAL_API_KEY", "")
 
 # ── Vision LLM へのプロンプト ─────────────────────────────────────────
-EXTRACTION_PROMPT = """あなたはスピンバイクの運動結果画面を解析する専門家です。
-この画像から運動情報を抽出し、以下の JSON スキーマに従って返してください。
+# NOTE: FLM（NPU）バックエンドのモデルは「プロンプト + 出力」の合計が 1024 トークンで打ち切られる
+# （max_tokens を上げても変わらない）。FLM に戻す場合に備え、プロンプトは短く・出力は 1 行 JSON に保つ
+EXTRACTION_PROMPT = """スピンバイクの運動結果画面（スクリーンショット）を読み取り、表示されている値だけを JSON で返す。
 
-## 抽出ルール
-1. 読み取れない・写っていない項目は null（推測しない）
-2. ゾーン名は以下の正規 5 名に正規化:
-   - ウォームアップ (Zone 1, Warm-up)
-   - インテンシブ (Zone 2, Intensive) 
-   - 有酸素 (Zone 3, Aerobic)
-   - 無酸素 (Zone 4, Anaerobic)
-   - 最大酸素摂取量 (Zone 5, VO2Max, High Intensity)
-3. ゾーン時間は mm:ss（60 分超は mmm:ss）
-4. 心拍は整数 bpm、距離は km の小数
-5. durationMinutes は整数分（h:mm 表記は換算）
-6. freeNotes には心拍ゾーン内訳以外の有用な情報（消費カロリー等）を簡潔に。無ければ空文字
-7. uncertainFields に読み取り確度が低い項目名を列挙。無ければ空配列
-8. 日付と RPE は抽出しない（Web 側で入力・自動算出するため）
+読み取りルール:
+- 時間が「目標」と「完了」にある場合、使うのは「完了」
+- 「心拍数 (BPM)」欄の大きな数字 2 つ: 左が平均心拍、右（最大 BPM）が最大心拍。グラフの目盛り数字は使わない
+- 下部のゾーン別棒グラフ右端の時間を上から順に ウォームアップ / インテンシブ / 有酸素 / 無酸素 / 最大酸素摂取量 に対応させる（ゾーン名は縦に折り返されることがある）。5 行すべてに時間がある。棒が空の行の時間は 00:00:00 で、5 つの合計は完了時間とほぼ一致する
+- 時間はすべて画面の表記のまま文字列で書き写す（換算しない）
+- 運動時間は completedTime に「完了」の時間を書き写す（無ければ null）
+- 画面にない項目は null。推測しない。確信が低い項目名は uncertainFields に入れる
+- 日付と RPE は抽出しない
 
-## 出力形式
-コードブロックや装飾は付けず、生の JSON のみを返してください。
-
-## JSON スキーマ
-{
-  "durationMinutes": integer or null,
-  "avgHeartRate": integer or null,
-  "maxHeartRate": integer or null,
-  "distanceKm": float or null,
-  "hrZones": {
-    "ウォームアップ": "mm:ss" or null,
-    "インテンシブ": "mm:ss" or null,
-    "有酸素": "mm:ss" or null,
-    "無酸素": "mm:ss" or null,
-    "最大酸素摂取量": "mm:ss" or null
-  },
-  "freeNotes": "string",
-  "uncertainFields": ["fieldName", ...]
-}"""
+改行・装飾なしの 1 行 JSON のみ返す:
+{"completedTime":"画面の表記のまま"|null,"avgHeartRate":int|null,"maxHeartRate":int|null,"distanceKm":float|null,"hrZones":{"ウォームアップ":"画面の表記"|null,"インテンシブ":"画面の表記"|null,"有酸素":"画面の表記"|null,"無酸素":"画面の表記"|null,"最大酸素摂取量":"画面の表記"|null},"freeNotes":"消費カロリー等の補足。無ければ空文字","uncertainFields":[]}"""
 
 
 # ── トレーニング評価プロンプト ────────────────────────────────────────
@@ -133,14 +116,45 @@ def build_evaluation_prompt(period_type: str, history: dict) -> str:
     return EVALUATION_PROMPT_HEADER.format(period_label=period_label, history_json=history_json)
 
 
+# ── 画像の前処理 ─────────────────────────────────────────────────────
+# スマホのスクリーンショット（1080x2400 等）をそのまま渡すと llama-server が応答不能になり
+# backend_watchdog_reset (500) で落ちる（幅 810px 以上で再現、720px は可）。長辺をこの値以下に縮小する
+MAX_IMAGE_EDGE = int(os.environ.get("SPIN_EXTRACT_MAX_IMAGE_EDGE", 1600))
+
+
+def downscale_image(image_base64: str, mime_type: str) -> tuple[str, str]:
+    """長辺が MAX_IMAGE_EDGE を超える画像を縮小する。失敗・不要なら入力をそのまま返す。"""
+    if Image is None:
+        return image_base64, mime_type
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(image_base64)))
+        img = ImageOps.exif_transpose(img)
+        longest = max(img.size)
+        if longest <= MAX_IMAGE_EDGE:
+            return image_base64, mime_type
+        scale = MAX_IMAGE_EDGE / longest
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+        buf = io.BytesIO()
+        if mime_type == "image/png":
+            img.save(buf, "PNG")
+        elif mime_type == "image/webp":
+            img.save(buf, "WEBP", quality=92)
+        else:
+            img.convert("RGB").save(buf, "JPEG", quality=92)
+        return base64.b64encode(buf.getvalue()).decode("ascii"), mime_type
+    except Exception as e:  # 壊れた画像などは元の入力でそのまま LLM に任せる
+        print(f"WARN: image downscale failed: {e}", file=sys.stderr)
+        return image_base64, mime_type
+
+
 # ── Vision LLM 呼び出し ──────────────────────────────────────────────
 def call_vision_llm(image_base64: str, mime_type: str) -> dict:
-    """OpenCode Go の mimo-v2.5 を使って画像解析を行う。"""
-    api_key = os.environ.get("OPENCODE_GO_API_KEY", "")
-    if not api_key:
-        raise ValueError("OPENCODE_GO_API_KEY is not set")
+    """Lemonade Server の vision モデルで画像解析を行う。"""
+    api_key = os.environ.get("LEMONADE_API_KEY", "")
 
     model = os.environ.get("SPIN_EXTRACT_MODEL", DEFAULT_MODEL)
+
+    image_base64, mime_type = downscale_image(image_base64, mime_type)
 
     # base64 を data URI 形式に
     data_uri = f"data:{mime_type};base64,{image_base64}"
@@ -159,22 +173,22 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
                 ]
             }
         ],
-        "max_tokens": 1024,
-        "temperature": 0.1
+        # Lemonade(FLM) は max_tokens を「プロンプト+画像トークン+出力」の合計上限として
+        # 扱うため、1024 ではプロンプトだけで使い切って JSON が途中で切れる
+        "max_tokens": 4096,
+        "temperature": 0.1,
+        # 書き写しタスクに思考は不要。無効化すると約 30 秒 → 数秒になり精度は変わらない
+        "chat_template_kwargs": {"enable_thinking": False}
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        f"{OPENCODE_GO_BASE_URL}/chat/completions",
+        f"{LEMONADE_BASE_URL}/chat/completions",
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            # urllib のデフォルト UA (Python-urllib/x.y) は Cloudflare の
-            # Bot 対策で 403 (error code: 1010) にブロックされるため明示的に上書きする
+            # Lemonade Server は既定で認証不要。LEMONADE_API_KEY があれば付与する
+            **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
             "User-Agent": "spin-image-extraction/1.0",
-            # OpenCode Go はルーティング最適化のため会話ごとに安定した
-            # セッション ID を要求する。1 リクエスト = 1 会話として扱う
-            "X-OpenCode-Session": str(uuid.uuid4())
         },
         method="POST"
     )
@@ -184,9 +198,9 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenCode Go API error {e.code}: {body}")
+        raise RuntimeError(f"Lemonade API error {e.code}: {body}")
     except urllib.error.URLError as e:
-        raise RuntimeError(f"OpenCode Go connection error: {e.reason}")
+        raise RuntimeError(f"Lemonade connection error: {e.reason}")
 
     # レスポンスからテキストを抽出
     try:
@@ -211,10 +225,8 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
 
 
 def call_text_llm(prompt: str) -> dict:
-    """OpenCode Go でテキストのみのプロンプトを評価させる（画像なし）。"""
-    api_key = os.environ.get("OPENCODE_GO_API_KEY", "")
-    if not api_key:
-        raise ValueError("OPENCODE_GO_API_KEY is not set")
+    """Lemonade Server でテキストのみのプロンプトを評価させる（画像なし）。"""
+    api_key = os.environ.get("LEMONADE_API_KEY", "")
 
     model = os.environ.get("TRAINING_EVAL_MODEL", DEFAULT_MODEL)
 
@@ -235,17 +247,13 @@ def call_text_llm(prompt: str) -> dict:
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        f"{OPENCODE_GO_BASE_URL}/chat/completions",
+        f"{LEMONADE_BASE_URL}/chat/completions",
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            # urllib のデフォルト UA (Python-urllib/x.y) は Cloudflare の
-            # Bot 対策で 403 (error code: 1010) にブロックされるため明示的に上書きする
+            # Lemonade Server は既定で認証不要。LEMONADE_API_KEY があれば付与する
+            **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
             "User-Agent": "spin-image-extraction/1.0",
-            # OpenCode Go はルーティング最適化のため会話ごとに安定した
-            # セッション ID を要求する。1 リクエスト = 1 会話として扱う
-            "X-OpenCode-Session": str(uuid.uuid4())
         },
         method="POST"
     )
@@ -255,9 +263,9 @@ def call_text_llm(prompt: str) -> dict:
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenCode Go API error {e.code}: {body}")
+        raise RuntimeError(f"Lemonade API error {e.code}: {body}")
     except urllib.error.URLError as e:
-        raise RuntimeError(f"OpenCode Go connection error: {e.reason}")
+        raise RuntimeError(f"Lemonade connection error: {e.reason}")
 
     try:
         content = result["choices"][0]["message"]["content"]
@@ -304,8 +312,16 @@ def validate_and_normalize(data: dict) -> dict:
         "uncertainFields": []
     }
 
+    # 運動時間: LLM は画面表記のまま completedTime（hh:mm:ss 等）を返し、ここで分に換算する。
+    # 旧形式（durationMinutes を直接返す）もフォールバックとして受け付ける
+    completed = normalize_time(data.get("completedTime"))
+    if completed:
+        result["durationMinutes"] = int(completed.split(":")[0])
+
     # 数値フィールド
     for field in ["durationMinutes", "avgHeartRate", "maxHeartRate"]:
+        if field == "durationMinutes" and result[field] is not None:
+            continue
         val = data.get(field)
         if val is not None:
             try:
@@ -328,9 +344,10 @@ def validate_and_normalize(data: dict) -> dict:
             # ゾーン名の正規化
             normalized_key = normalize_zone_name(key)
             if normalized_key and val is not None:
-                # 時間の形式検証 (mm:ss or mmm:ss)
-                if isinstance(val, str) and validate_time_format(val):
-                    result["hrZones"][normalized_key] = val
+                # モデルが画面の hh:mm:ss や "9:16" をそのまま返しても mm:ss に直す
+                normalized_time = normalize_time(val)
+                if normalized_time and validate_time_format(normalized_time):
+                    result["hrZones"][normalized_key] = normalized_time
 
     # フリーノート
     notes = data.get("freeNotes", "")
@@ -343,6 +360,19 @@ def validate_and_normalize(data: dict) -> dict:
         result["uncertainFields"] = [
             f for f in uncertain if f in VALID_UNCERTAIN_FIELDS
         ]
+
+    # 整合性チェック: ゾーン合計が運動時間を明らかに超えるなら誤読の疑いがある。
+    # 値は変えず、確認を促すために uncertainFields へ hrZones を足す
+    if result["durationMinutes"] is not None and result["hrZones"]:
+        zone_minutes = sum(
+            int(t.split(":")[0]) + int(t.split(":")[1]) / 60
+            for t in result["hrZones"].values()
+        )
+        if (
+            zone_minutes > result["durationMinutes"] + 2
+            and "hrZones" not in result["uncertainFields"]
+        ):
+            result["uncertainFields"].append("hrZones")
 
     return result
 
@@ -381,6 +411,29 @@ def normalize_zone_name(name: str) -> Optional[str]:
     }
 
     return en_mapping.get(name_lower)
+
+
+def normalize_time(value) -> Optional[str]:
+    """hh:mm:ss / m:ss などを mm:ss（60 分超は mmm:ss）に正規化する。不正値は None。"""
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if len(parts) not in (2, 3):
+        return None
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        hours, minutes, seconds = nums
+        if hours < 0 or minutes < 0 or minutes >= 60:
+            return None
+        minutes += hours * 60
+    else:
+        minutes, seconds = nums
+    if minutes < 0 or not 0 <= seconds < 60:
+        return None
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def validate_time_format(time_str: str) -> bool:
@@ -696,10 +749,6 @@ def main():
         print("Generate with: python3 -c \"import secrets; print(secrets.token_hex(32))\"", file=sys.stderr)
         sys.exit(1)
 
-    if not os.environ.get("OPENCODE_GO_API_KEY"):
-        print("ERROR: OPENCODE_GO_API_KEY is not set", file=sys.stderr)
-        sys.exit(1)
-
     if not TRAINING_EVAL_API_KEY:
         print("WARN: TRAINING_EVAL_API_KEY is not set — POST /evaluate-training will return 503", file=sys.stderr)
 
@@ -718,7 +767,7 @@ def main():
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  Model: {os.environ.get('SPIN_EXTRACT_MODEL', DEFAULT_MODEL)}")
-    print(f"  Provider: OpenCode Go ({OPENCODE_GO_BASE_URL})")
+    print(f"  Provider: Lemonade Server ({LEMONADE_BASE_URL})")
     print(f"  Timeout: {TIMEOUT_SECONDS}s")
     print(f"  Auth: Bearer token (SPIN_EXTRACT_API_KEY / TRAINING_EVAL_API_KEY)")
     print(f"\nEndpoints:")
