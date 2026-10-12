@@ -28,8 +28,8 @@ PORT = int(os.environ.get("SPIN_EXTRACT_PORT", 8646))
 HOST = os.environ.get("SPIN_EXTRACT_HOST", "0.0.0.0")
 TIMEOUT_SECONDS = 90
 
-# Lemonade Server（OpenAI 互換 API）の qwen3vl-flash-4b-FLM を使用
-DEFAULT_MODEL = "qwen3vl-flash-4b-FLM"
+# Lemonade Server（OpenAI 互換 API）の gemma4e-flash-e4b-FLM を使用
+DEFAULT_MODEL = "gemma4e-flash-e4b-FLM"
 LEMONADE_BASE_URL = os.environ.get("LEMONADE_BASE_URL", "http://172.16.1.20:13305/api/v1").rstrip("/")
 
 # ── 環境変数読み込み ──────────────────────────────────────────────────
