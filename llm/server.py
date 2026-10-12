@@ -17,19 +17,25 @@ import os
 import signal
 import sys
 import time
+import io
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Optional
 
+try:
+    from PIL import Image, ImageOps
+except ImportError:  # Pillow が無い環境では縮小せず原寸のまま送る
+    Image = None
+
 # ── 設定 ───────────────────────────────────────────────────────────────
 PORT = int(os.environ.get("SPIN_EXTRACT_PORT", 8646))
 HOST = os.environ.get("SPIN_EXTRACT_HOST", "0.0.0.0")
 TIMEOUT_SECONDS = 90
 
-# Lemonade Server（OpenAI 互換 API）の gemma4e-flash-e4b-FLM を使用
-DEFAULT_MODEL = "gemma4e-flash-e4b-FLM"
+# Lemonade Server（OpenAI 互換 API）の Gemma-4-12B-it-MTP-GGUF（llama.cpp）を使用
+DEFAULT_MODEL = "Gemma-4-12B-it-MTP-GGUF"
 LEMONADE_BASE_URL = os.environ.get("LEMONADE_BASE_URL", "http://172.16.1.20:13305/api/v1").rstrip("/")
 
 # ── 環境変数読み込み ──────────────────────────────────────────────────
@@ -55,8 +61,8 @@ SPIN_EXTRACT_API_KEY = os.environ.get("SPIN_EXTRACT_API_KEY", "")
 TRAINING_EVAL_API_KEY = os.environ.get("TRAINING_EVAL_API_KEY", "")
 
 # ── Vision LLM へのプロンプト ─────────────────────────────────────────
-# NOTE: Lemonade(FLM) 環境では「プロンプト + 出力」の合計が 1024 トークンで打ち切られる
-# （max_tokens を上げても変わらない）。プロンプトは短く保ち、出力も改行なしの 1 行 JSON にする
+# NOTE: FLM（NPU）バックエンドのモデルは「プロンプト + 出力」の合計が 1024 トークンで打ち切られる
+# （max_tokens を上げても変わらない）。FLM に戻す場合に備え、プロンプトは短く・出力は 1 行 JSON に保つ
 EXTRACTION_PROMPT = """スピンバイクの運動結果画面（スクリーンショット）を読み取り、表示されている値だけを JSON で返す。
 
 読み取りルール:
@@ -110,12 +116,45 @@ def build_evaluation_prompt(period_type: str, history: dict) -> str:
     return EVALUATION_PROMPT_HEADER.format(period_label=period_label, history_json=history_json)
 
 
+# ── 画像の前処理 ─────────────────────────────────────────────────────
+# スマホのスクリーンショット（1080x2400 等）をそのまま渡すと llama-server が応答不能になり
+# backend_watchdog_reset (500) で落ちる（幅 810px 以上で再現、720px は可）。長辺をこの値以下に縮小する
+MAX_IMAGE_EDGE = int(os.environ.get("SPIN_EXTRACT_MAX_IMAGE_EDGE", 1600))
+
+
+def downscale_image(image_base64: str, mime_type: str) -> tuple[str, str]:
+    """長辺が MAX_IMAGE_EDGE を超える画像を縮小する。失敗・不要なら入力をそのまま返す。"""
+    if Image is None:
+        return image_base64, mime_type
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(image_base64)))
+        img = ImageOps.exif_transpose(img)
+        longest = max(img.size)
+        if longest <= MAX_IMAGE_EDGE:
+            return image_base64, mime_type
+        scale = MAX_IMAGE_EDGE / longest
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+        buf = io.BytesIO()
+        if mime_type == "image/png":
+            img.save(buf, "PNG")
+        elif mime_type == "image/webp":
+            img.save(buf, "WEBP", quality=92)
+        else:
+            img.convert("RGB").save(buf, "JPEG", quality=92)
+        return base64.b64encode(buf.getvalue()).decode("ascii"), mime_type
+    except Exception as e:  # 壊れた画像などは元の入力でそのまま LLM に任せる
+        print(f"WARN: image downscale failed: {e}", file=sys.stderr)
+        return image_base64, mime_type
+
+
 # ── Vision LLM 呼び出し ──────────────────────────────────────────────
 def call_vision_llm(image_base64: str, mime_type: str) -> dict:
     """Lemonade Server の vision モデルで画像解析を行う。"""
     api_key = os.environ.get("LEMONADE_API_KEY", "")
 
     model = os.environ.get("SPIN_EXTRACT_MODEL", DEFAULT_MODEL)
+
+    image_base64, mime_type = downscale_image(image_base64, mime_type)
 
     # base64 を data URI 形式に
     data_uri = f"data:{mime_type};base64,{image_base64}"
@@ -137,7 +176,9 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
         # Lemonade(FLM) は max_tokens を「プロンプト+画像トークン+出力」の合計上限として
         # 扱うため、1024 ではプロンプトだけで使い切って JSON が途中で切れる
         "max_tokens": 4096,
-        "temperature": 0.1
+        "temperature": 0.1,
+        # 書き写しタスクに思考は不要。無効化すると約 30 秒 → 数秒になり精度は変わらない
+        "chat_template_kwargs": {"enable_thinking": False}
     }).encode("utf-8")
 
     req = urllib.request.Request(
