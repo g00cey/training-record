@@ -28,7 +28,7 @@ import (
 )
 
 // DefaultTimeout bounds a single evaluation call. The upstream vision/text
-// LLM provider (OpenCode Go) can be slow, so keep the same budget as
+// LLM provider (Lemonade Server) can be slow, so keep the same budget as
 // internal/hermes.
 const DefaultTimeout = 90 * time.Second
 

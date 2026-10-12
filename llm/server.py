@@ -19,7 +19,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-import uuid
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Optional
@@ -29,9 +28,9 @@ PORT = int(os.environ.get("SPIN_EXTRACT_PORT", 8646))
 HOST = os.environ.get("SPIN_EXTRACT_HOST", "0.0.0.0")
 TIMEOUT_SECONDS = 90
 
-# OpenCode Go の mimo-v2.5 を使用
-DEFAULT_MODEL = "mimo-v2.5"
-OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
+# Lemonade Server（OpenAI 互換 API）の qwen3vl-flash-4b-FLM を使用
+DEFAULT_MODEL = "qwen3vl-flash-4b-FLM"
+LEMONADE_BASE_URL = os.environ.get("LEMONADE_BASE_URL", "http://172.16.1.20:13305/api/v1").rstrip("/")
 
 # ── 環境変数読み込み ──────────────────────────────────────────────────
 def load_env_file():
@@ -135,10 +134,8 @@ def build_evaluation_prompt(period_type: str, history: dict) -> str:
 
 # ── Vision LLM 呼び出し ──────────────────────────────────────────────
 def call_vision_llm(image_base64: str, mime_type: str) -> dict:
-    """OpenCode Go の mimo-v2.5 を使って画像解析を行う。"""
-    api_key = os.environ.get("OPENCODE_GO_API_KEY", "")
-    if not api_key:
-        raise ValueError("OPENCODE_GO_API_KEY is not set")
+    """Lemonade Server の vision モデルで画像解析を行う。"""
+    api_key = os.environ.get("LEMONADE_API_KEY", "")
 
     model = os.environ.get("SPIN_EXTRACT_MODEL", DEFAULT_MODEL)
 
@@ -164,17 +161,13 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        f"{OPENCODE_GO_BASE_URL}/chat/completions",
+        f"{LEMONADE_BASE_URL}/chat/completions",
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            # urllib のデフォルト UA (Python-urllib/x.y) は Cloudflare の
-            # Bot 対策で 403 (error code: 1010) にブロックされるため明示的に上書きする
+            # Lemonade Server は既定で認証不要。LEMONADE_API_KEY があれば付与する
+            **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
             "User-Agent": "spin-image-extraction/1.0",
-            # OpenCode Go はルーティング最適化のため会話ごとに安定した
-            # セッション ID を要求する。1 リクエスト = 1 会話として扱う
-            "X-OpenCode-Session": str(uuid.uuid4())
         },
         method="POST"
     )
@@ -184,9 +177,9 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenCode Go API error {e.code}: {body}")
+        raise RuntimeError(f"Lemonade API error {e.code}: {body}")
     except urllib.error.URLError as e:
-        raise RuntimeError(f"OpenCode Go connection error: {e.reason}")
+        raise RuntimeError(f"Lemonade connection error: {e.reason}")
 
     # レスポンスからテキストを抽出
     try:
@@ -211,10 +204,8 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
 
 
 def call_text_llm(prompt: str) -> dict:
-    """OpenCode Go でテキストのみのプロンプトを評価させる（画像なし）。"""
-    api_key = os.environ.get("OPENCODE_GO_API_KEY", "")
-    if not api_key:
-        raise ValueError("OPENCODE_GO_API_KEY is not set")
+    """Lemonade Server でテキストのみのプロンプトを評価させる（画像なし）。"""
+    api_key = os.environ.get("LEMONADE_API_KEY", "")
 
     model = os.environ.get("TRAINING_EVAL_MODEL", DEFAULT_MODEL)
 
@@ -235,17 +226,13 @@ def call_text_llm(prompt: str) -> dict:
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        f"{OPENCODE_GO_BASE_URL}/chat/completions",
+        f"{LEMONADE_BASE_URL}/chat/completions",
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            # urllib のデフォルト UA (Python-urllib/x.y) は Cloudflare の
-            # Bot 対策で 403 (error code: 1010) にブロックされるため明示的に上書きする
+            # Lemonade Server は既定で認証不要。LEMONADE_API_KEY があれば付与する
+            **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
             "User-Agent": "spin-image-extraction/1.0",
-            # OpenCode Go はルーティング最適化のため会話ごとに安定した
-            # セッション ID を要求する。1 リクエスト = 1 会話として扱う
-            "X-OpenCode-Session": str(uuid.uuid4())
         },
         method="POST"
     )
@@ -255,9 +242,9 @@ def call_text_llm(prompt: str) -> dict:
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenCode Go API error {e.code}: {body}")
+        raise RuntimeError(f"Lemonade API error {e.code}: {body}")
     except urllib.error.URLError as e:
-        raise RuntimeError(f"OpenCode Go connection error: {e.reason}")
+        raise RuntimeError(f"Lemonade connection error: {e.reason}")
 
     try:
         content = result["choices"][0]["message"]["content"]
@@ -696,10 +683,6 @@ def main():
         print("Generate with: python3 -c \"import secrets; print(secrets.token_hex(32))\"", file=sys.stderr)
         sys.exit(1)
 
-    if not os.environ.get("OPENCODE_GO_API_KEY"):
-        print("ERROR: OPENCODE_GO_API_KEY is not set", file=sys.stderr)
-        sys.exit(1)
-
     if not TRAINING_EVAL_API_KEY:
         print("WARN: TRAINING_EVAL_API_KEY is not set — POST /evaluate-training will return 503", file=sys.stderr)
 
@@ -718,7 +701,7 @@ def main():
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  Model: {os.environ.get('SPIN_EXTRACT_MODEL', DEFAULT_MODEL)}")
-    print(f"  Provider: OpenCode Go ({OPENCODE_GO_BASE_URL})")
+    print(f"  Provider: Lemonade Server ({LEMONADE_BASE_URL})")
     print(f"  Timeout: {TIMEOUT_SECONDS}s")
     print(f"  Auth: Bearer token (SPIN_EXTRACT_API_KEY / TRAINING_EVAL_API_KEY)")
     print(f"\nEndpoints:")
