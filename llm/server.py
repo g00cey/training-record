@@ -55,43 +55,21 @@ SPIN_EXTRACT_API_KEY = os.environ.get("SPIN_EXTRACT_API_KEY", "")
 TRAINING_EVAL_API_KEY = os.environ.get("TRAINING_EVAL_API_KEY", "")
 
 # ── Vision LLM へのプロンプト ─────────────────────────────────────────
-EXTRACTION_PROMPT = """あなたはスピンバイクの運動結果画面を解析する専門家です。
-この画像から運動情報を抽出し、以下の JSON スキーマに従って返してください。
+# NOTE: Lemonade(FLM) 環境では「プロンプト + 出力」の合計が 1024 トークンで打ち切られる
+# （max_tokens を上げても変わらない）。プロンプトは短く保ち、出力も改行なしの 1 行 JSON にする
+EXTRACTION_PROMPT = """スピンバイクの運動結果画面（スクリーンショット）を読み取り、表示されている値だけを JSON で返す。
 
-## 抽出ルール
-1. 読み取れない・写っていない項目は null（推測しない）
-2. ゾーン名は以下の正規 5 名に正規化:
-   - ウォームアップ (Zone 1, Warm-up)
-   - インテンシブ (Zone 2, Intensive) 
-   - 有酸素 (Zone 3, Aerobic)
-   - 無酸素 (Zone 4, Anaerobic)
-   - 最大酸素摂取量 (Zone 5, VO2Max, High Intensity)
-3. ゾーン時間は mm:ss（60 分超は mmm:ss）
-4. 心拍は整数 bpm、距離は km の小数
-5. durationMinutes は整数分（h:mm 表記は換算）
-6. freeNotes には心拍ゾーン内訳以外の有用な情報（消費カロリー等）を簡潔に。無ければ空文字
-7. uncertainFields に読み取り確度が低い項目名を列挙。無ければ空配列
-8. 日付と RPE は抽出しない（Web 側で入力・自動算出するため）
+読み取りルール:
+- 時間が「目標」と「完了」にある場合、使うのは「完了」
+- 「心拍数 (BPM)」欄の大きな数字 2 つ: 左が平均心拍、右（最大 BPM）が最大心拍。グラフの目盛り数字は使わない
+- 下部のゾーン別棒グラフ右端の時間を上から順に ウォームアップ / インテンシブ / 有酸素 / 無酸素 / 最大酸素摂取量 に対応させる（ゾーン名は縦に折り返されることがある）。5 行すべてに時間がある。棒が空の行の時間は 00:00:00 で、5 つの合計は完了時間とほぼ一致する
+- 時間はすべて画面の表記のまま文字列で書き写す（換算しない）
+- 運動時間は completedTime に「完了」の時間を書き写す（無ければ null）
+- 画面にない項目は null。推測しない。確信が低い項目名は uncertainFields に入れる
+- 日付と RPE は抽出しない
 
-## 出力形式
-コードブロックや装飾は付けず、生の JSON のみを返してください。
-
-## JSON スキーマ
-{
-  "durationMinutes": integer or null,
-  "avgHeartRate": integer or null,
-  "maxHeartRate": integer or null,
-  "distanceKm": float or null,
-  "hrZones": {
-    "ウォームアップ": "mm:ss" or null,
-    "インテンシブ": "mm:ss" or null,
-    "有酸素": "mm:ss" or null,
-    "無酸素": "mm:ss" or null,
-    "最大酸素摂取量": "mm:ss" or null
-  },
-  "freeNotes": "string",
-  "uncertainFields": ["fieldName", ...]
-}"""
+改行・装飾なしの 1 行 JSON のみ返す:
+{"completedTime":"画面の表記のまま"|null,"avgHeartRate":int|null,"maxHeartRate":int|null,"distanceKm":float|null,"hrZones":{"ウォームアップ":"画面の表記"|null,"インテンシブ":"画面の表記"|null,"有酸素":"画面の表記"|null,"無酸素":"画面の表記"|null,"最大酸素摂取量":"画面の表記"|null},"freeNotes":"消費カロリー等の補足。無ければ空文字","uncertainFields":[]}"""
 
 
 # ── トレーニング評価プロンプト ────────────────────────────────────────
@@ -156,7 +134,9 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
                 ]
             }
         ],
-        "max_tokens": 1024,
+        # Lemonade(FLM) は max_tokens を「プロンプト+画像トークン+出力」の合計上限として
+        # 扱うため、1024 ではプロンプトだけで使い切って JSON が途中で切れる
+        "max_tokens": 4096,
         "temperature": 0.1
     }).encode("utf-8")
 
@@ -291,8 +271,16 @@ def validate_and_normalize(data: dict) -> dict:
         "uncertainFields": []
     }
 
+    # 運動時間: LLM は画面表記のまま completedTime（hh:mm:ss 等）を返し、ここで分に換算する。
+    # 旧形式（durationMinutes を直接返す）もフォールバックとして受け付ける
+    completed = normalize_time(data.get("completedTime"))
+    if completed:
+        result["durationMinutes"] = int(completed.split(":")[0])
+
     # 数値フィールド
     for field in ["durationMinutes", "avgHeartRate", "maxHeartRate"]:
+        if field == "durationMinutes" and result[field] is not None:
+            continue
         val = data.get(field)
         if val is not None:
             try:
@@ -315,9 +303,10 @@ def validate_and_normalize(data: dict) -> dict:
             # ゾーン名の正規化
             normalized_key = normalize_zone_name(key)
             if normalized_key and val is not None:
-                # 時間の形式検証 (mm:ss or mmm:ss)
-                if isinstance(val, str) and validate_time_format(val):
-                    result["hrZones"][normalized_key] = val
+                # モデルが画面の hh:mm:ss や "9:16" をそのまま返しても mm:ss に直す
+                normalized_time = normalize_time(val)
+                if normalized_time and validate_time_format(normalized_time):
+                    result["hrZones"][normalized_key] = normalized_time
 
     # フリーノート
     notes = data.get("freeNotes", "")
@@ -330,6 +319,19 @@ def validate_and_normalize(data: dict) -> dict:
         result["uncertainFields"] = [
             f for f in uncertain if f in VALID_UNCERTAIN_FIELDS
         ]
+
+    # 整合性チェック: ゾーン合計が運動時間を明らかに超えるなら誤読の疑いがある。
+    # 値は変えず、確認を促すために uncertainFields へ hrZones を足す
+    if result["durationMinutes"] is not None and result["hrZones"]:
+        zone_minutes = sum(
+            int(t.split(":")[0]) + int(t.split(":")[1]) / 60
+            for t in result["hrZones"].values()
+        )
+        if (
+            zone_minutes > result["durationMinutes"] + 2
+            and "hrZones" not in result["uncertainFields"]
+        ):
+            result["uncertainFields"].append("hrZones")
 
     return result
 
@@ -368,6 +370,29 @@ def normalize_zone_name(name: str) -> Optional[str]:
     }
 
     return en_mapping.get(name_lower)
+
+
+def normalize_time(value) -> Optional[str]:
+    """hh:mm:ss / m:ss などを mm:ss（60 分超は mmm:ss）に正規化する。不正値は None。"""
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if len(parts) not in (2, 3):
+        return None
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        hours, minutes, seconds = nums
+        if hours < 0 or minutes < 0 or minutes >= 60:
+            return None
+        minutes += hours * 60
+    else:
+        minutes, seconds = nums
+    if minutes < 0 or not 0 <= seconds < 60:
+        return None
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def validate_time_format(time_str: str) -> bool:
