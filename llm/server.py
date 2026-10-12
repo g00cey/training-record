@@ -36,6 +36,8 @@ TIMEOUT_SECONDS = 90
 
 # Lemonade Server（OpenAI 互換 API）の Gemma-4-12B-it-MTP-GGUF（llama.cpp）を使用
 DEFAULT_MODEL = "Gemma-4-12B-it-MTP-GGUF"
+# LLM トレーニング評価（テキストのみ）は gpt-oss-20b-GGUF-MXFP4 を使用
+DEFAULT_EVAL_MODEL = "gpt-oss-20b-GGUF-MXFP4"
 LEMONADE_BASE_URL = os.environ.get("LEMONADE_BASE_URL", "http://172.16.1.20:13305/api/v1").rstrip("/")
 
 # ── 環境変数読み込み ──────────────────────────────────────────────────
@@ -228,7 +230,7 @@ def call_text_llm(prompt: str) -> dict:
     """Lemonade Server でテキストのみのプロンプトを評価させる（画像なし）。"""
     api_key = os.environ.get("LEMONADE_API_KEY", "")
 
-    model = os.environ.get("TRAINING_EVAL_MODEL", DEFAULT_MODEL)
+    model = os.environ.get("TRAINING_EVAL_MODEL", DEFAULT_EVAL_MODEL)
 
     payload = json.dumps({
         "model": model,
@@ -766,7 +768,8 @@ def main():
     print(f"Spin Bike Image Extraction Server")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
-    print(f"  Model: {os.environ.get('SPIN_EXTRACT_MODEL', DEFAULT_MODEL)}")
+    print(f"  Model (extract-spin): {os.environ.get('SPIN_EXTRACT_MODEL', DEFAULT_MODEL)}")
+    print(f"  Model (evaluate-training): {os.environ.get('TRAINING_EVAL_MODEL', DEFAULT_EVAL_MODEL)}")
     print(f"  Provider: Lemonade Server ({LEMONADE_BASE_URL})")
     print(f"  Timeout: {TIMEOUT_SECONDS}s")
     print(f"  Auth: Bearer token (SPIN_EXTRACT_API_KEY / TRAINING_EVAL_API_KEY)")
