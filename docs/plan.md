@@ -141,8 +141,9 @@
 DB に保存して Web UI に表示する。既存の故障予防アドバイス（Phase 6・ルールベース、毎回再計算）
 や週次サマリーの `evaluation` とは独立の追加機能。評価は2種類:
 
-- **biweekly（直近2週間）**: 過去10件まで履歴を確認可能
-- **bimonthly（直近8週間・約2ヶ月）**: 最新1件のみ
+- **biweekly（固定2週間・日曜〜土曜）**: 1期間1行で保持。進行中の期間は毎日上書き更新、
+  期間終了後に確定評価へ置き換わる。過去10件まで履歴を確認可能
+- **bimonthly（直近8週間・約2ヶ月）**: 最新1件のみ（毎日1行追加）
 
 - 8A（`llm/` 評価 API）:
   - `llm/server.py` に `POST /evaluate-training` を追加（既存 `/extract-spin` と同一プロセス・ポート）。
@@ -154,7 +155,10 @@ DB に保存して Web UI に表示する。既存の故障予防アドバイス
   - `internal/llmeval/`: `internal/hermes` を雛形にした薄い HTTP クライアント（`Config`/`Client`/`Error`、
     markdown フェンス対応の緩いパース、`Normalize` で二重検証）
   - `internal/service/trainingeval.go`: `computeLoadMetricsFrom`（既存 analytics）を再利用し、8週間の履歴を
-    1回取得してから biweekly / bimonthly 2回 LLM を呼ぶ（一方が失敗してももう一方は保存する）
+    1回取得してから LLM を呼ぶ（一方が失敗してももう一方は保存する）。biweekly は固定2週間
+    （`domain.BiweeklyPeriodOf` の日曜〜土曜グリッド）を1期間1行（upsert）で保持:
+    進行中の期間を毎日更新し、期間終了後の最初の実行で全14日分の確定評価に置き換える。
+    旧日次行（ローリング窓）は起動時 fixup `collapseLegacyBiweeklyEvaluations` で整理
   - API: `GET /api/training-evaluations/bimonthly`（最新1件、無ければ404）、
     `GET /api/training-evaluations/biweekly`（最新10件まで）→ [api.md](./api.md)
   - `cmd/server`: `-evaluate-training` サブコマンド（`-backup` と同じパターン）

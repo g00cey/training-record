@@ -116,8 +116,8 @@ type SpinSessionPayload struct {
 
 // HistoryPayload is what backend sends to llm/'s POST /evaluate-training.
 // PeriodType selects the prompt framing on the llm/ side ("biweekly" =
-// 直近2週間, "bimonthly" = 直近8週間・約2ヶ月); Strength/Spin are pre-filtered
-// by the caller to [PeriodFrom, PeriodTo].
+// 固定2週間（日曜〜土曜）, "bimonthly" = 直近8週間・約2ヶ月); Strength/Spin are
+// pre-filtered by the caller to [PeriodFrom, PeriodTo]（進行中の期間は評価日まで）.
 type HistoryPayload struct {
 	PeriodType  string                   `json:"periodType"`
 	AsOf        string                   `json:"asOf"`

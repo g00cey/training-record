@@ -81,8 +81,10 @@ EXTRACTION_PROMPT = """スピンバイクの運動結果画面（スクリーン
 
 
 # ── トレーニング評価プロンプト ────────────────────────────────────────
+# biweekly は固定2週間（日曜〜土曜）の期間。進行中の期間は backend が
+# periodFrom〜評価日までのセッションを送ってくる。
 EVALUATION_PERIOD_LABEL = {
-    "biweekly": "直近2週間",
+    "biweekly": "2週間分",
     "bimonthly": "直近8週間（約2ヶ月）",
 }
 

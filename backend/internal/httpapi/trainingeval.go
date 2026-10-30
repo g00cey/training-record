@@ -26,7 +26,8 @@ func (h *Handlers) trainingEvaluationBimonthly(w http.ResponseWriter, r *http.Re
 }
 
 // trainingEvaluationBiweekly handles GET /api/training-evaluations/biweekly
-// — 直近2週間評価の履歴（最新10件まで）。
+// — 固定2週間（日曜〜土曜）ごとの評価履歴（最新10件まで）。進行中の期間は
+// 毎日上書き更新され、期間の終了後に確定評価へ置き換わる。
 func (h *Handlers) trainingEvaluationBiweekly(w http.ResponseWriter, r *http.Request) error {
 	limit, err := qInt(r, "limit", maxRecentTrainingEvaluations)
 	if err != nil {

@@ -72,7 +72,10 @@ services:
       start_period: 20s
     restart: unless-stopped
     labels:
-      # ofelia（下記サービス）が1日1回 job-exec で叩く定期バッチ
+      # ofelia（下記サービス）が1日1回 job-exec で叩く定期バッチ。
+      # biweekly は固定2週間（日曜〜土曜）単位の保持: 進行中の期間を毎日更新し、
+      # 期間終了後の最初の実行で確定評価を保存する（バッチ内で判定）。
+      # bimonthly は毎日1行追加。
       ofelia.enabled: "true"
       ofelia.job-exec.training-evaluation.schedule: "0 0 3 * * *" # 毎日 03:00 JST
       ofelia.job-exec.training-evaluation.command: "/app/server -evaluate-training"

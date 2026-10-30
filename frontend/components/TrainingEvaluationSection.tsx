@@ -76,7 +76,7 @@ function BiweeklyEvaluationHistoryCard() {
       {error && <ErrorBox error={error} onRetry={() => mutate()} />}
       {isLoading && !error && <Spinner />}
       {data && !error && data.evaluations.length === 0 && (
-        <EmptyState>まだ評価がありません（毎日自動実行されます）。</EmptyState>
+        <EmptyState>まだ評価がありません（トレーニング記録後に自動で評価されます）。</EmptyState>
       )}
       {data && !error && data.evaluations.length > 0 && (
         <div className="max-h-96 space-y-2 overflow-y-auto">
