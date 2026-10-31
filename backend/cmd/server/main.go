@@ -133,10 +133,12 @@ func runBackupDaily() int {
 }
 
 // runEvaluateTraining runs the daily LLM training-evaluation batch (Phase 8):
-// it gathers recent training history, asks the LLM evaluation server
-// ($LLM_EVAL_API_URL) for a biweekly and a bimonthly evaluation, and
-// persists both. Intended to be invoked once a day by an external scheduler
-// (ofelia job-exec against this container; see compose.yaml).
+// it gathers recent training history and asks the LLM evaluation server
+// ($LLM_EVAL_API_URL) for evaluations, then persists them. biweekly は固定の
+// 2週間（日曜〜土曜）ごとの期間単位で保持する（進行中の期間を毎日上書き更新し、
+// 期間の終了後の最初の実行で確定評価へ置き換える）。bimonthly は直近
+// historyWeeks 週間の評価を毎日1行追加する。Intended to be invoked once a day
+// by an external scheduler (ofelia job-exec against this container; see compose.yaml).
 func runEvaluateTraining() int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -160,6 +162,13 @@ func runEvaluateTraining() int {
 		return 1
 	}
 
+	// 旧日次行（ローリング窓の biweekly 評価）を固定2週間単位に整理する。
+	// 冪等なので毎回実行してよい（整理済みなら no-op）。
+	if err := database.CollapseLegacyBiweeklyEvaluations(db); err != nil {
+		fmt.Fprintf(os.Stderr, "evaluate-training: collapse legacy biweekly evaluations: %v\n", err)
+		return 1
+	}
+
 	st := store.New(db)
 	svc := service.New(st)
 	client := llmeval.New(llmeval.Config{URL: cfg.LLMEvalURL, APIKey: cfg.LLMEvalKey})
@@ -169,7 +178,7 @@ func runEvaluateTraining() int {
 
 	biweekly, bimonthly, errs := svc.RunTrainingEvaluations(ctx, client, time.Now().In(domain.JST), cfg.LLMEvalHistoryWeeks)
 	if biweekly != nil {
-		fmt.Printf("evaluate-training: saved biweekly id=%d periodTo=%s\n", biweekly.ID, biweekly.PeriodTo)
+		fmt.Printf("evaluate-training: saved biweekly id=%d period=%s〜%s\n", biweekly.ID, biweekly.PeriodFrom, biweekly.PeriodTo)
 	}
 	if bimonthly != nil {
 		fmt.Printf("evaluate-training: saved bimonthly id=%d periodTo=%s\n", bimonthly.ID, bimonthly.PeriodTo)
@@ -218,6 +227,13 @@ func run() error {
 	// snapshots into named presets. Runs every startup, no-op once done.
 	if err := database.EnsureRoutinePresets(db); err != nil {
 		return fmt.Errorf("ensure routine presets: %w", err)
+	}
+
+	// Idempotent fixup: 旧日次バッチが保存したローリング窓の biweekly 評価行を
+	// 固定2週間（日曜〜土曜）単位に整理する（1期間1行）。Runs every startup,
+	// no-op once done.
+	if err := database.CollapseLegacyBiweeklyEvaluations(db); err != nil {
+		return fmt.Errorf("collapse legacy biweekly evaluations: %w", err)
 	}
 
 	st := store.New(db)

@@ -87,9 +87,9 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 | カラム | 型 | 既定 | 用途 |
 |--------|----|------|------|
 | `id` | INTEGER PK AUTOINCREMENT | | |
-| `period_type` | TEXT NOT NULL CHECK IN ('biweekly','bimonthly') | | `biweekly`=直近2週間、`bimonthly`=直近8週間（約2ヶ月） |
+| `period_type` | TEXT NOT NULL CHECK IN ('biweekly','bimonthly') | | `biweekly`=固定2週間（日曜〜土曜・1期間1行）、`bimonthly`=直近8週間（約2ヶ月・日次1行） |
 | `evaluated_at` | TEXT NOT NULL | | 評価実行時刻（RFC3339, JST） |
-| `period_from` / `period_to` | TEXT NOT NULL | | 評価対象期間（`YYYY-MM-DD`） |
+| `period_from` / `period_to` | TEXT NOT NULL | | 評価対象期間（`YYYY-MM-DD`）。biweekly は固定2週間の境界（例: `2026-10-18` 〜 `2026-10-31`） |
 | `model` | TEXT NOT NULL | `''` | 使用した LLM モデル名（現状常に空文字） |
 | `summary` | TEXT NOT NULL | `''` | 総評（2〜3文） |
 | `details_json` | TEXT NOT NULL | `'{}'` | `{"strengths":[...],"concerns":[...],"suggestions":[...]}` |
@@ -97,7 +97,11 @@ Web 版はこれを踏襲し、カラム追加のみ行う（意味は変えな�
 | `created_at` | TEXT NOT NULL | `datetime('now')` | |
 
 既存の `advice` / `load-report` は毎回再計算するが、これは `server -evaluate-training`（1日1回のバッチ）
-が生成した結果を永続化する点が異なる。→ [api.md](./api.md) LLM トレーニング評価、[plan.md](./plan.md) Phase 8
+が生成した結果を永続化する点が異なる。biweekly は固定2週間（`domain.BiweeklyPeriodOf` の
+日曜〜土曜グリッド）ごとに1行を保持し、進行中の期間は毎日のバッチで上書き更新（upsert）、
+期間終了後の最初の実行で全14日分のデータによる確定評価へ置き換わる。
+bimonthly は従来どおり直近8週間の評価を毎日1行追加する。
+→ [api.md](./api.md) LLM トレーニング評価、[plan.md](./plan.md) Phase 8
 
 ## インデックス（現行踏襲）
 
@@ -184,4 +188,17 @@ CREATE TABLE IF NOT EXISTS training_evaluations (
 CREATE INDEX IF NOT EXISTS idx_training_evaluations_period_evaluated_at
   ON training_evaluations(period_type, evaluated_at DESC);
 ```
+
+### 旧日次行の整理は Go の fixup で（`collapseLegacyBiweeklyEvaluations`）
+
+旧バッチは biweekly を毎日1行（`period_from` = 実行日-14日 / `period_to` = 実行日のローリング窓）で
+保存していた。biweekly を固定2週間（日曜〜土曜）の1期間1行に切り替えるのに合わせて、起動時 fixup
+（migrate の後・サーバー起動時と `-evaluate-training` バッチの両方）で既存行を整理する。冪等。
+
+1. legacy 行（`period_to - period_from` = 14日）を実行日（`period_to`）が属する固定2週間期間ごとにグループ化
+2. 各グループの最新行をその期間の代表として残し、`period_from` / `period_to` を固定期間の境界に書き換え
+3. 残りの行を削除
+
+bimonthly 行とすでに固定グリッド形式（期間の長さ = 13日）の biweekly 行は触らない。
+legacy 行が無くなれば以降は no-op。
 </content>

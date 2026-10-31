@@ -255,6 +255,39 @@ func MondayOf(date string) string {
 	return t.AddDate(0, 0, -offset).Format(DateLayout)
 }
 
+// BiweeklyPeriodDays is the length (in days) of one fixed "biweekly"
+// training-evaluation period on the grid below.
+const BiweeklyPeriodDays = 14
+
+// biweeklyGridAnchor is the Sunday that fixes the phase of the fixed
+// two-week grid used by the "biweekly" training evaluation:
+// 9/20〜10/3, 10/4〜10/17, 10/18〜10/31, 11/1〜11/14, ...（日曜始まり・土曜終わり）.
+var biweeklyGridAnchor = time.Date(2026, 10, 4, 0, 0, 0, 0, JST)
+
+// BiweeklyPeriodOf returns the fixed two-week period (日曜〜土曜) on the
+// biweekly evaluation grid that contains t: from is always a Sunday and
+// to = from + 13 days (Saturday). t is first converted to JST.
+func BiweeklyPeriodOf(t time.Time) (from, to time.Time) {
+	jst := t.In(JST)
+	d := time.Date(jst.Year(), jst.Month(), jst.Day(), 0, 0, 0, 0, JST)
+	sun := d.AddDate(0, 0, -int(d.Weekday())) // この週の日曜日
+	days := int(sun.Sub(biweeklyGridAnchor).Hours() / 24)
+	off := ((days % BiweeklyPeriodDays) + BiweeklyPeriodDays) % BiweeklyPeriodDays
+	from = sun.AddDate(0, 0, -off)
+	return from, from.AddDate(0, 0, BiweeklyPeriodDays-1)
+}
+
+// BiweeklyPeriodOfDate is BiweeklyPeriodOf for a YYYY-MM-DD string.
+// ok is false when date is not parseable.
+func BiweeklyPeriodOfDate(date string) (from, to string, ok bool) {
+	t, err := time.ParseInLocation(DateLayout, date, JST)
+	if err != nil {
+		return "", "", false
+	}
+	f, u := BiweeklyPeriodOf(t)
+	return f.Format(DateLayout), u.Format(DateLayout), true
+}
+
 // Round1 / Round2 / RoundInt are the rounding helpers used for API output.
 func Round1(x float64) float64   { return math.Round(x*10) / 10 }
 func Round2(x float64) float64   { return math.Round(x*100) / 100 }
