@@ -291,9 +291,30 @@ def call_text_llm(prompt: str) -> dict:
     try:
         evaluated = json.loads(content)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nContent: {content[:500]}")
+        # gpt-oss 系は推論文や <|channel|> 等の制御トークンが content に混入することがある。
+        # 本文中から評価スキーマ（summary を持つオブジェクト）を探して救済する
+        evaluated = extract_eval_json(content)
+        if evaluated is None:
+            raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nContent: {content[:500]}")
 
     return evaluated
+
+
+def extract_eval_json(content: str) -> Optional[dict]:
+    """テキスト中の JSON オブジェクトのうち、"summary" キーを持つ最後のものを返す。"""
+    decoder = json.JSONDecoder()
+    found = None
+    pos = content.find("{")
+    while pos != -1:
+        try:
+            obj, end = decoder.raw_decode(content, pos)
+        except json.JSONDecodeError:
+            pos = content.find("{", pos + 1)
+            continue
+        if isinstance(obj, dict) and "summary" in obj:
+            found = obj
+        pos = content.find("{", end)
+    return found
 
 
 # ── スキーマ検証 ──────────────────────────────────────────────────────
