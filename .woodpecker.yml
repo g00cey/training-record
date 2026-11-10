@@ -23,6 +23,7 @@ steps:
       - cd frontend
       - npm ci
       - npm run lint
+      - rm -rf node_modules
 
   - name: build-backend
     image: plugins/kaniko
@@ -32,12 +33,14 @@ steps:
     settings:
       registry: docker-registry.g00cey.main
       repo: docker-registry.g00cey.main/training-record/backend
+      username: anonymous
+      password: dummy
+      skip_push_permission_check: true
+      skip_tls_verify: true
+      skip_tls_verify_pull: true
       context: backend
       dockerfile: backend/Dockerfile
       target: prod
-      insecure: true
-      insecure_pull: true
-      skip_tls_verify_registry: true
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
@@ -50,14 +53,16 @@ steps:
     settings:
       registry: docker-registry.g00cey.main
       repo: docker-registry.g00cey.main/training-record/frontend
+      username: anonymous
+      password: dummy
+      skip_push_permission_check: true
+      skip_tls_verify: true
+      skip_tls_verify_pull: true
+      build_args:
+        - NEXT_PUBLIC_API_BASE=/bff
       context: frontend
       dockerfile: frontend/Dockerfile
       target: prod
-      insecure: true
-      insecure_pull: true
-      skip_tls_verify_registry: true
-      build_args:
-        - NEXT_PUBLIC_API_BASE=/bff
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
@@ -70,11 +75,13 @@ steps:
     settings:
       registry: docker-registry.g00cey.main
       repo: docker-registry.g00cey.main/training-record/llm
+      username: anonymous
+      password: dummy
+      skip_push_permission_check: true
+      skip_tls_verify: true
+      skip_tls_verify_pull: true
       context: llm
       dockerfile: llm/Dockerfile
-      insecure: true
-      insecure_pull: true
-      skip_tls_verify_registry: true
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
