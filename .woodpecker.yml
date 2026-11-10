@@ -36,6 +36,10 @@ steps:
       dockerfile: backend/Dockerfile
       target: prod
       insecure: true
+      buildkit_config: |
+        [registry."docker-registry.g00cey.main"]
+          http = false
+          insecure = true
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
@@ -52,6 +56,10 @@ steps:
       dockerfile: frontend/Dockerfile
       target: prod
       insecure: true
+      buildkit_config: |
+        [registry."docker-registry.g00cey.main"]
+          http = false
+          insecure = true
       build_args:
         NEXT_PUBLIC_API_BASE: /bff
       tags:
@@ -69,6 +77,10 @@ steps:
       context: llm
       dockerfile: llm/Dockerfile
       insecure: true
+      buildkit_config: |
+        [registry."docker-registry.g00cey.main"]
+          http = false
+          insecure = true
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
