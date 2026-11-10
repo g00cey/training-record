@@ -1,0 +1,94 @@
+when:
+  - event: [push, manual]
+    branch: master
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      # LAN 内 mkcert 証明書 (gitea.g00cey.main) の TLS 検証エラーを回避
+      skip_verify: true
+
+steps:
+  - name: backend-test
+    image: golang:1.25
+    commands:
+      - cd backend
+      - go vet ./...
+      - go test ./...
+
+  - name: frontend-lint
+    image: node:24-alpine
+    commands:
+      - cd frontend
+      - npm ci
+      - npm run lint
+
+  - name: build-backend
+    image: woodpeckerci/plugin-docker-buildx
+    depends_on:
+      - backend-test
+      - frontend-lint
+    settings:
+      registry: docker-registry.g00cey.main
+      repo: docker-registry.g00cey.main/training-record/backend
+      context: backend
+      dockerfile: backend/Dockerfile
+      target: prod
+      insecure: true
+      tags:
+        - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
+        - latest
+
+  - name: build-frontend
+    image: woodpeckerci/plugin-docker-buildx
+    depends_on:
+      - backend-test
+      - frontend-lint
+    settings:
+      registry: docker-registry.g00cey.main
+      repo: docker-registry.g00cey.main/training-record/frontend
+      context: frontend
+      dockerfile: frontend/Dockerfile
+      target: prod
+      insecure: true
+      build_args:
+        NEXT_PUBLIC_API_BASE: /bff
+      tags:
+        - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
+        - latest
+
+  - name: build-llm
+    image: woodpeckerci/plugin-docker-buildx
+    depends_on:
+      - backend-test
+      - frontend-lint
+    settings:
+      registry: docker-registry.g00cey.main
+      repo: docker-registry.g00cey.main/training-record/llm
+      context: llm
+      dockerfile: llm/Dockerfile
+      insecure: true
+      tags:
+        - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
+        - latest
+
+  - name: deploy
+    image: bitnami/kubectl:latest
+    depends_on:
+      - build-backend
+      - build-frontend
+      - build-llm
+    backend_options:
+      kubernetes:
+        serviceAccountName: training-record-deployer
+    commands:
+      - TAG="${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
+      - echo "Deploying training-record with image tag ${TAG}"
+      - |
+        for f in deploy/k8s/*.yml; do
+          sed "s/__TAG__/${TAG}/g" "$f" | kubectl apply -n training-record -f -
+        done
+      - kubectl -n training-record rollout status deployment/backend --timeout=5m
+      - kubectl -n training-record rollout status deployment/frontend --timeout=5m
+      - kubectl -n training-record rollout status deployment/spin-extraction --timeout=5m
