@@ -1,0 +1,114 @@
+# 日次 DB バックアップ（毎日 02:00 JST）
+# training-data PVC は ReadWriteOnce (truenas-iscsi) のため、
+# podAffinity で backend Pod と同一ノードにスケジュールする。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  namespace: training-record
+  labels:
+    app: db-backup
+spec:
+  schedule: "0 2 * * *"
+  timeZone: "Asia/Tokyo"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app: db-backup
+        spec:
+          restartPolicy: OnFailure
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: backend
+                  topologyKey: kubernetes.io/hostname
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+          containers:
+            - name: db-backup
+              image: docker-registry.g00cey.main/training-record/backend:__TAG__
+              imagePullPolicy: IfNotPresent
+              args: ["-backup-daily"]
+              envFrom:
+                - configMapRef:
+                    name: training-record-config
+                - secretRef:
+                    name: training-record-secret
+              volumeMounts:
+                - name: training-data
+                  mountPath: /data
+                - name: training-backups
+                  mountPath: /backups
+          volumes:
+            - name: training-data
+              persistentVolumeClaim:
+                claimName: training-data
+            - name: training-backups
+              persistentVolumeClaim:
+                claimName: training-backups
+---
+# 日次 LLM トレーニング評価バッチ（毎日 03:00 JST）
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: evaluate-training
+  namespace: training-record
+  labels:
+    app: evaluate-training
+spec:
+  schedule: "0 3 * * *"
+  timeZone: "Asia/Tokyo"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            app: evaluate-training
+        spec:
+          restartPolicy: OnFailure
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: backend
+                  topologyKey: kubernetes.io/hostname
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+          containers:
+            - name: evaluate-training
+              image: docker-registry.g00cey.main/training-record/backend:__TAG__
+              imagePullPolicy: IfNotPresent
+              args: ["-evaluate-training"]
+              envFrom:
+                - configMapRef:
+                    name: training-record-config
+                - secretRef:
+                    name: training-record-secret
+              volumeMounts:
+                - name: training-data
+                  mountPath: /data
+          volumes:
+            - name: training-data
+              persistentVolumeClaim:
+                claimName: training-data

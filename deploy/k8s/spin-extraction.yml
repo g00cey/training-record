@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spin-extraction
+  namespace: training-record
+  labels:
+    app: spin-extraction
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spin-extraction
+  template:
+    metadata:
+      labels:
+        app: spin-extraction
+    spec:
+      containers:
+        - name: spin-extraction
+          image: docker-registry.g00cey.main/training-record/llm:__TAG__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8646
+          envFrom:
+            - configMapRef:
+                name: training-record-config
+            - secretRef:
+                name: training-record-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8646
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8646
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5

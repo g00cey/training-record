@@ -30,6 +30,9 @@ backups_dir:
 	mkdir -p backups
 	chmod 777 backups
 
+kill:
+	docker compose -f llm/docker-compose.yml kill
+	docker compose kill
 down:
 	docker compose -f llm/docker-compose.yml down
 	docker compose down
