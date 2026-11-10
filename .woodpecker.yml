@@ -25,7 +25,7 @@ steps:
       - npm run lint
 
   - name: build-backend
-    image: woodpeckerci/plugin-docker-buildx
+    image: plugins/kaniko
     depends_on:
       - backend-test
       - frontend-lint
@@ -36,16 +36,14 @@ steps:
       dockerfile: backend/Dockerfile
       target: prod
       insecure: true
-      buildkit_config: |
-        [registry."docker-registry.g00cey.main"]
-          http = false
-          insecure = true
+      insecure_pull: true
+      skip_tls_verify_registry: true
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
 
   - name: build-frontend
-    image: woodpeckerci/plugin-docker-buildx
+    image: plugins/kaniko
     depends_on:
       - backend-test
       - frontend-lint
@@ -56,18 +54,16 @@ steps:
       dockerfile: frontend/Dockerfile
       target: prod
       insecure: true
-      buildkit_config: |
-        [registry."docker-registry.g00cey.main"]
-          http = false
-          insecure = true
+      insecure_pull: true
+      skip_tls_verify_registry: true
       build_args:
-        NEXT_PUBLIC_API_BASE: /bff
+        - NEXT_PUBLIC_API_BASE=/bff
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
 
   - name: build-llm
-    image: woodpeckerci/plugin-docker-buildx
+    image: plugins/kaniko
     depends_on:
       - backend-test
       - frontend-lint
@@ -77,10 +73,8 @@ steps:
       context: llm
       dockerfile: llm/Dockerfile
       insecure: true
-      buildkit_config: |
-        [registry."docker-registry.g00cey.main"]
-          http = false
-          insecure = true
+      insecure_pull: true
+      skip_tls_verify_registry: true
       tags:
         - "${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
         - latest
