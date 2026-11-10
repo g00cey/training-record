@@ -96,11 +96,11 @@ steps:
       kubernetes:
         serviceAccountName: training-record-deployer
     commands:
-      - TAG="${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
-      - echo "Deploying training-record with image tag ${TAG}"
+      - echo "Deploying training-record with image tag ${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
       - |
         for f in deploy/k8s/*.yml; do
-          sed "s/__TAG__/${TAG}/g" "$f" | kubectl apply -n training-record -f -
+          echo "Applying $$f with tag ${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}"
+          sed "s/__TAG__/${CI_PIPELINE_NUMBER}-${CI_COMMIT_SHA:0:8}/g" "$$f" | kubectl apply -n training-record -f -
         done
       - kubectl -n training-record rollout status deployment/backend --timeout=5m
       - kubectl -n training-record rollout status deployment/frontend --timeout=5m
