@@ -199,7 +199,7 @@ func TestSpinExtractHermesTimeout(t *testing.T) {
 
 	svc, _ := testsupport.NewService(t)
 	hc := hermes.New(hermes.Config{URL: srv.URL, Timeout: 50 * time.Millisecond})
-	h := httpapi.NewRouter(svc, key, hc)
+	h := httpapi.NewRouter(svc, key, hc, nil)
 	w := postImage(h, "image", pngBytes)
 	if w.Code != 504 {
 		t.Fatalf("code = %d (%s)", w.Code, w.Body.String())

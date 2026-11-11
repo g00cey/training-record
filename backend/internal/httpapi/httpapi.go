@@ -12,19 +12,21 @@ import (
 
 	"training-record/internal/apperr"
 	"training-record/internal/hermes"
+	"training-record/internal/llmconsult"
 	"training-record/internal/service"
 )
 
 // Handlers holds the dependencies for all HTTP handlers.
 type Handlers struct {
-	svc    *service.Service
-	hermes *hermes.Client // nil = 画像抽出（/api/spin-extract）は未設定
+	svc     *service.Service
+	hermes  *hermes.Client     // nil = 画像抽出（/api/spin-extract）は未設定
+	consult *llmconsult.Client // nil = トレーニング相談（/api/consultations）は未設定
 }
 
 // NewRouter builds the fully-wired HTTP handler (routes + auth middleware).
-// hc may be nil: POST /api/spin-extract then answers 503.
-func NewRouter(svc *service.Service, apiKey string, hc *hermes.Client) http.Handler {
-	h := &Handlers{svc: svc, hermes: hc}
+// hc / cc may be nil: endpoints then answer 503.
+func NewRouter(svc *service.Service, apiKey string, hc *hermes.Client, cc *llmconsult.Client) http.Handler {
+	h := &Handlers{svc: svc, hermes: hc, consult: cc}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", handle(h.health))
@@ -85,6 +87,13 @@ func NewRouter(svc *service.Service, apiKey string, hc *hermes.Client) http.Hand
 	mux.HandleFunc("GET /api/training-evaluations/biweekly", handle(h.trainingEvaluationBiweekly))
 	mux.HandleFunc("GET /api/sessions/last", handle(h.lastSessions))
 	mux.HandleFunc("GET /api/history", handle(h.history))
+
+	// training consultations
+	mux.HandleFunc("GET /api/consultations", handle(h.listConsultations))
+	mux.HandleFunc("POST /api/consultations", handle(h.createConsultation))
+	mux.HandleFunc("GET /api/consultations/{id}", handle(h.getConsultation))
+	mux.HandleFunc("POST /api/consultations/{id}/messages", handle(h.addConsultationMessage))
+	mux.HandleFunc("DELETE /api/consultations/{id}", handle(h.deleteConsultation))
 
 	// JSON 404 for anything else
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

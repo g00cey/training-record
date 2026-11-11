@@ -61,6 +61,7 @@ load_env_file()
 
 SPIN_EXTRACT_API_KEY = os.environ.get("SPIN_EXTRACT_API_KEY", "")
 TRAINING_EVAL_API_KEY = os.environ.get("TRAINING_EVAL_API_KEY", "")
+TRAINING_CONSULT_API_KEY = os.environ.get("TRAINING_CONSULT_API_KEY", "") or TRAINING_EVAL_API_KEY
 
 # ── Vision LLM へのプロンプト ─────────────────────────────────────────
 # NOTE: FLM（NPU）バックエンドのモデルは「プロンプト + 出力」の合計が 1024 トークンで打ち切られる
@@ -118,6 +119,42 @@ def build_evaluation_prompt(period_type: str, history: dict) -> str:
     period_label = EVALUATION_PERIOD_LABEL.get(period_type, period_type)
     history_json = json.dumps(history, ensure_ascii=False, indent=2)
     return EVALUATION_PROMPT_HEADER.format(period_label=period_label, history_json=history_json)
+
+
+# ── トレーニング相談プロンプト ────────────────────────────────────────
+CONSULTATION_SYSTEM_TEMPLATE = """あなたは筋力トレーニングとスピンバイクの専門的なパーソナルトレーナーです。
+ユーザーのトレーニング目的・目標に対し、提供されたトレーニング記録（直近2週間分）、現在のプリセットメニュー、プロフィール、負荷指標（ACWR等）を分析して的確かつ親身にアドバイスしてください。
+
+## ユーザーのコンテキスト情報
+{context_json}
+
+## ユーザーが設定した目的・相談内容
+{goal}
+
+## 回答のルール
+1. 直近2週間の種目・重量・レップ・セット数や、現在のプリセット、ACWRなどの客観的データを踏まえて具体的に回答してください。
+2. 断定的な医学的診断や危険な負荷設定は避け、怪我予防と継続性を最優先してください。
+3. すべて日本語でわかりやすく回答してください。
+4. 【重要: 回答モード】
+{mode_instruction}"""
+
+MODE_ADVICE = """- 現在は「アドバイス・質疑応答モード」です。
+- ユーザーの質問や相談に丁寧に答えてください。
+- また、最終的なメニュー提案の精度を高めるため、気になった点やユーザーの希望（週あたりの目標頻度、重点的に鍛えたい部位、1回あたりのトレーニング時間など）があれば1〜2点簡潔に質問・確認してください。"""
+
+MODE_PROPOSAL = """- 現在は「メニュー提案モード」です。
+- これまでのやり取りの最終結果として、具体的なトレーニングメニュー案（種目名・重量または自重・回数・セット数、推奨頻度や分割スケジュール）を箇条書き等でわかりやすく提示してください。"""
+
+
+def build_consultation_system_prompt(goal: str, context: dict, request_menu_proposal: bool) -> str:
+    """トレーニング相談用のシステムプロンプトを構築する。"""
+    mode_instruction = MODE_PROPOSAL if request_menu_proposal else MODE_ADVICE
+    context_json = json.dumps(context, ensure_ascii=False, indent=2)
+    return CONSULTATION_SYSTEM_TEMPLATE.format(
+        context_json=context_json,
+        goal=goal,
+        mode_instruction=mode_instruction
+    )
 
 
 # ── 画像の前処理 ─────────────────────────────────────────────────────
@@ -315,6 +352,62 @@ def extract_eval_json(content: str) -> Optional[dict]:
             found = obj
         pos = content.find("{", end)
     return found
+
+
+def call_consult_llm(system_prompt: str, messages: list[dict]) -> str:
+    """Lemonade Server でトレーニング相談の対話を行わせる。"""
+    api_key = os.environ.get("LEMONADE_API_KEY", "")
+    model = os.environ.get("TRAINING_CONSULT_MODEL", "") or os.environ.get("TRAINING_EVAL_MODEL", DEFAULT_EVAL_MODEL)
+
+    chat_messages = [{"role": "system", "content": system_prompt}]
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content", "")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            chat_messages.append({"role": role, "content": content.strip()})
+
+    payload = json.dumps({
+        "model": model,
+        "messages": chat_messages,
+        "max_tokens": 4096,
+        "temperature": 0.3
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{LEMONADE_BASE_URL}/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
+            "User-Agent": "spin-image-extraction/1.0",
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Lemonade API error {e.code}: {body}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Lemonade connection error: {e.reason}")
+
+    try:
+        content = result["choices"][0]["message"]["content"]
+    except (KeyError, IndexError):
+        raise RuntimeError(f"Unexpected API response: {json.dumps(result)[:500]}")
+
+    if not isinstance(content, str) or not content.strip():
+        finish_reason = result.get("choices", [{}])[0].get("finish_reason", "?")
+        raise RuntimeError(f"LLM returned empty content (finish_reason={finish_reason}): {json.dumps(result)[:500]}")
+
+    content = content.strip()
+    if "<|channel|>" in content:
+        content = content.split("<|channel|>")[-1].strip()
+
+    return content[:4000]
+
 
 
 # ── スキーマ検証 ──────────────────────────────────────────────────────
@@ -559,6 +652,8 @@ class ExtractionHandler(BaseHTTPRequestHandler):
             self._handle_extract_spin()
         elif self.path == "/evaluate-training":
             self._handle_evaluate_training()
+        elif self.path == "/consult-training":
+            self._handle_consult_training()
         else:
             self.send_json(404, {
                 "error": "NotFound",
@@ -765,6 +860,86 @@ class ExtractionHandler(BaseHTTPRequestHandler):
 
         self.send_json(200, result)
 
+    def _handle_consult_training(self):
+        """POST /consult-training: トレーニングの相談・メニュー提案を行う。"""
+        if not self._auth_or_reject(TRAINING_CONSULT_API_KEY):
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": "Empty request body"
+            })
+            return
+
+        if content_length > 2 * 1024 * 1024:  # 2MB
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": "Request body too large (max 2MB)"
+            })
+            return
+
+        try:
+            body = self.rfile.read(content_length)
+            request_data = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": "Invalid JSON"
+            })
+            return
+
+        goal = request_data.get("goal", "")
+        if not isinstance(goal, str) or not goal.strip():
+            self.send_json(400, {
+                "error": "BadRequest",
+                "message": "goal is required"
+            })
+            return
+
+        context = request_data.get("context", {})
+        if not isinstance(context, dict):
+            context = {}
+
+        messages = request_data.get("messages", [])
+        if not isinstance(messages, list):
+            messages = []
+
+        request_menu_proposal = bool(request_data.get("requestMenuProposal", False))
+
+        system_prompt = build_consultation_system_prompt(goal.strip(), context, request_menu_proposal)
+
+        start_time = time.time()
+        try:
+            self.log_message(f"Starting training consultation (proposal={request_menu_proposal})...")
+            reply = call_consult_llm(system_prompt, messages)
+            elapsed = time.time() - start_time
+            self.log_message(f"Consultation completed in {elapsed:.1f}s")
+        except RuntimeError as e:
+            elapsed = time.time() - start_time
+            self.log_message(f"Consultation failed after {elapsed:.1f}s: {e}")
+            if elapsed >= TIMEOUT_SECONDS:
+                self.send_json(408, {
+                    "error": "Timeout",
+                    "message": "Training consultation exceeded time limit"
+                })
+            else:
+                self.send_json(500, {
+                    "error": "InternalError",
+                    "message": str(e)
+                })
+            return
+        except Exception as e:
+            self.log_message(f"Unexpected error: {e}")
+            self.send_json(500, {
+                "error": "InternalError",
+                "message": f"Unexpected error: {type(e).__name__}"
+            })
+            return
+
+        self.send_json(200, {"reply": reply})
+
 
 # ── サーバ起動 ────────────────────────────────────────────────────────
 def main():
@@ -776,6 +951,9 @@ def main():
 
     if not TRAINING_EVAL_API_KEY:
         print("WARN: TRAINING_EVAL_API_KEY is not set — POST /evaluate-training will return 503", file=sys.stderr)
+
+    if not TRAINING_CONSULT_API_KEY:
+        print("WARN: TRAINING_CONSULT_API_KEY is not set — POST /consult-training will return 503", file=sys.stderr)
 
     server = HTTPServer((HOST, PORT), ExtractionHandler)
 

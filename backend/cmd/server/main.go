@@ -26,6 +26,7 @@ import (
 	"training-record/internal/domain"
 	"training-record/internal/hermes"
 	"training-record/internal/httpapi"
+	"training-record/internal/llmconsult"
 	"training-record/internal/llmeval"
 	"training-record/internal/service"
 	"training-record/internal/store"
@@ -246,7 +247,14 @@ func run() error {
 		log.Printf("startup: hermes image extraction enabled (%s)", cfg.HermesURL)
 	}
 
-	handler := httpapi.NewRouter(svc, cfg.APIKey, hermesClient)
+	// トレーニング相談（/api/consultations）は LLM_CONSULT_API_URL があれば有効化
+	var consultClient *llmconsult.Client
+	if cfg.LLMConsultURL != "" {
+		consultClient = llmconsult.New(llmconsult.Config{URL: cfg.LLMConsultURL, APIKey: cfg.LLMConsultKey})
+		log.Printf("startup: llm consultation enabled (%s)", cfg.LLMConsultURL)
+	}
+
+	handler := httpapi.NewRouter(svc, cfg.APIKey, hermesClient, consultClient)
 
 	srv := &http.Server{
 		Addr:              net.JoinHostPort("", cfg.Port),

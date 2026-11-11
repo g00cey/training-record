@@ -135,6 +135,36 @@ type TrainingEvaluation struct {
 	CreatedAt   string
 }
 
+// ConsultationMessage is one message in a training consultation conversation.
+type ConsultationMessage struct {
+	ID             int64
+	ConsultationID int64
+	Role           string // "user" or "assistant"
+	Content        string
+	CreatedAt      string
+}
+
+// Consultation is a training consultation session.
+type Consultation struct {
+	ID          int64
+	Goal        string
+	ContextJSON string
+	CreatedAt   string
+	UpdatedAt   string
+	Messages    []ConsultationMessage
+}
+
+// ConsultationSummary represents a session item in the consultations list.
+type ConsultationSummary struct {
+	ID                   int64
+	Goal                 string
+	MessageCount         int
+	LatestMessagePreview string
+	CreatedAt            string
+	UpdatedAt            string
+}
+
+
 // ---------------------------------------------------------------------------
 // Volume Load (domain.md / training_load_analysis.py)
 // ---------------------------------------------------------------------------

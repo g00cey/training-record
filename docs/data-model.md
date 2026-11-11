@@ -201,4 +201,34 @@ CREATE INDEX IF NOT EXISTS idx_training_evaluations_period_evaluated_at
 
 bimonthly 行とすでに固定グリッド形式（期間の長さ = 13日）の biweekly 行は触らない。
 legacy 行が無くなれば以降は no-op。
+
+## 0004 — トレーニング相談（Issue #17）
+
+AI パーソナルトレーナーとの相談セッションおよび対話履歴を保存するテーブルを追加する。
+
+### `0004_add_consultations.sql`
+```sql
+CREATE TABLE IF NOT EXISTS consultations (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  goal         TEXT NOT NULL,
+  context_json TEXT NOT NULL DEFAULT '{}',
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS consultation_messages (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  consultation_id INTEGER NOT NULL REFERENCES consultations(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content         TEXT NOT NULL,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_consultations_updated_at
+  ON consultations(updated_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_consultation_messages_consultation_id
+  ON consultation_messages(consultation_id, id ASC);
+```
+
 </content>

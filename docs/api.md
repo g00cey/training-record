@@ -49,6 +49,7 @@ backend が公開する API。**frontend と任意の外部クライアントの
 | （新規） | `GET /api/calendar` / `GET /api/volume` / `GET /api/load-report` / `GET|PUT /api/profile` |
 | （新規・Phase 7） | `POST /api/spin-extract`（スピン画像抽出・Web UI 専用） |
 | （新規・Phase 8） | `GET /api/training-evaluations/bimonthly` / `GET /api/training-evaluations/biweekly`（LLM トレーニング評価・読み取り専用） |
+| （新規・Issue #17） | `POST /api/consultations` / `GET /api/consultations` / `GET|DELETE /api/consultations/{id}` / `POST /api/consultations/{id}/messages`（LLM トレーニング相談） |
 
 ---
 
@@ -461,6 +462,33 @@ GET /api/training-evaluations/biweekly
 - `strengths` / `concerns` / `suggestions` は常に配列（`null` にしない）。空配列もあり得る
 - `model` は現状常に空文字（LLM 側のレスポンスにモデル名を含めていないため）。将来 `llm/` が返すようになれば埋まる
 - 生の LLM レスポンス（`raw_response`）は監査目的で DB にのみ保存し、API では公開しない
+
+### トレーニング相談（Issue #17）
+
+ユーザーが入力したトレーニング目的と、直近2週間の記録・現在のプリセット・負荷指標（ACWR等）をもとに、AIパーソナルトレーナーとチャット形式で相談やメニュー提案のやり取りを行うエンドポイント群。
+
+```
+POST /api/consultations
+{ "goal": "筋肥大目的でトレーニングしているが..." }
+→ 201 ConsultationDetail
+
+GET /api/consultations?limit=50&offset=0
+→ 200 { "items": [ ConsultationSummary... ], "total": 1 }
+
+GET /api/consultations/{id}
+→ 200 ConsultationDetail | 404
+
+POST /api/consultations/{id}/messages
+{ "content": "週3回のペースで分割したい", "requestMenuProposal": false }
+→ 200 ConsultationDetail
+
+DELETE /api/consultations/{id}
+→ 204 | 404
+```
+
+- `requestMenuProposal: true` の場合、`content` が空なら既定文言（`ここまでの相談内容をもとに、具体的なトレーニングメニューを提案してください。`）を自動補完して最終メニュー案の作成を依頼する。
+- 相談セッション削除時は紐づく全メッセージも `CASCADE` で削除される。
+- LLM サーバ（`llm/`）の `POST /consult-training` と通信する。
 
 ---
 

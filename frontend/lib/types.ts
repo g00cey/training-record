@@ -307,3 +307,35 @@ export type TrainingEvaluation = {
 export type TrainingEvaluationList = {
   evaluations: TrainingEvaluation[];
 };
+
+// --- トレーニング相談機能 ---
+
+export type ConsultationMessage = {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+};
+
+export type ConsultationDetail = {
+  id: number;
+  goal: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ConsultationMessage[];
+};
+
+export type ConsultationSummary = {
+  id: number;
+  goal: string;
+  messageCount: number;
+  latestMessagePreview: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ConsultationListResponse = {
+  items: ConsultationSummary[];
+  total: number;
+};
+
