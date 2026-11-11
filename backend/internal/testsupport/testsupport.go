@@ -17,6 +17,7 @@ import (
 	"training-record/internal/database"
 	"training-record/internal/hermes"
 	"training-record/internal/httpapi"
+	"training-record/internal/llmconsult"
 	"training-record/internal/service"
 	"training-record/internal/store"
 )
@@ -48,11 +49,11 @@ func NewService(t testing.TB) (*service.Service, *store.Store) {
 }
 
 // NewRouter returns the HTTP handler wired to a fresh migrated database,
-// using apiKey for auth. The spin-image extraction client is unset (503 on
-// POST /api/spin-extract).
+// using apiKey for auth. The spin-image extraction client and consultation client
+// are unset (503 on POST /api/spin-extract and POST /api/consultations).
 func NewRouter(t testing.TB, apiKey string) (http.Handler, *store.Store) {
 	svc, st := NewService(t)
-	return httpapi.NewRouter(svc, apiKey, nil), st
+	return httpapi.NewRouter(svc, apiKey, nil, nil), st
 }
 
 // NewRouterWithHermes is NewRouter plus a spin-image extraction client
@@ -60,13 +61,21 @@ func NewRouter(t testing.TB, apiKey string) (http.Handler, *store.Store) {
 func NewRouterWithHermes(t testing.TB, apiKey, hermesURL, hermesKey string) http.Handler {
 	t.Helper()
 	svc, _ := NewService(t)
-	if hermesURL == "" {
-		return httpapi.NewRouter(svc, apiKey, nil)
+	var hc *hermes.Client
+	if hermesURL != "" {
+		hc = hermes.New(hermes.Config{
+			URL:     hermesURL,
+			APIKey:  hermesKey,
+			Timeout: 5 * time.Second,
+		})
 	}
-	hc := hermes.New(hermes.Config{
-		URL:     hermesURL,
-		APIKey:  hermesKey,
-		Timeout: 5 * time.Second,
-	})
-	return httpapi.NewRouter(svc, apiKey, hc)
+	return httpapi.NewRouter(svc, apiKey, hc, nil)
 }
+
+// NewRouterWithConsult returns a router with an attached consultation client.
+func NewRouterWithConsult(t testing.TB, apiKey string, cc *llmconsult.Client) (http.Handler, *store.Store) {
+	t.Helper()
+	svc, st := NewService(t)
+	return httpapi.NewRouter(svc, apiKey, nil, cc), st
+}
+

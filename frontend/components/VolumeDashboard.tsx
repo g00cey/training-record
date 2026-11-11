@@ -15,6 +15,7 @@ import type {
 } from '@/lib/types';
 import { AcwrGauge } from './AcwrGauge';
 import { AdviceCard } from './AdviceCard';
+import { ConsultationModal } from './ConsultationModal';
 import { TrainingEvaluationSection } from './TrainingEvaluationSection';
 import {
   Card,
@@ -39,6 +40,7 @@ const METRIC_LABEL: Record<ExerciseMetric, string> = {
 };
 
 export function VolumeDashboard() {
+  const [consultationOpen, setConsultationOpen] = useState(false);
   const [granularity, setGranularity] = useState<Granularity>('session');
   const [exercise, setExercise] = useState('');
   const [metric, setMetric] = useState<ExerciseMetric>('volumeLoad');
@@ -115,6 +117,22 @@ export function VolumeDashboard() {
           />
         </div>
       )}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setConsultationOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-brand-200 bg-brand-50 px-3.5 py-1.5 text-sm font-medium text-brand-700 shadow-sm transition hover:bg-brand-100"
+        >
+          <span>💬</span>
+          <span>AIにトレーニングを相談する</span>
+        </button>
+      </div>
+
+      <ConsultationModal
+        isOpen={consultationOpen}
+        onClose={() => setConsultationOpen(false)}
+      />
 
       <Card>
         <div className="mb-3 flex items-center justify-between gap-2">

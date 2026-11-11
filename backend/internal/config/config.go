@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config is the fully-resolved backend configuration.
@@ -19,10 +20,25 @@ type Config struct {
 	LLMEvalURL          string // LLM_EVAL_API_URL (optional; enables `server -evaluate-training`)
 	LLMEvalKey          string // LLM_EVAL_API_KEY (optional; bearer key for the LLM evaluation API)
 	LLMEvalHistoryWeeks int    // LLM_EVAL_HISTORY_WEEKS (default 8)
+	LLMConsultURL       string // LLM_CONSULT_API_URL (optional; enables /api/consultations)
+	LLMConsultKey       string // LLM_CONSULT_API_KEY (optional; bearer key for the consultation API)
 }
 
 // Load reads configuration from the environment. APIKey is required.
 func Load() (*Config, error) {
+	evalURL := os.Getenv("LLM_EVAL_API_URL")
+	evalKey := os.Getenv("LLM_EVAL_API_KEY")
+	consultURL := os.Getenv("LLM_CONSULT_API_URL")
+	if consultURL == "" && evalURL != "" {
+		if strings.HasSuffix(evalURL, "/evaluate-training") {
+			consultURL = strings.TrimSuffix(evalURL, "/evaluate-training") + "/consult-training"
+		}
+	}
+	consultKey := os.Getenv("LLM_CONSULT_API_KEY")
+	if consultKey == "" {
+		consultKey = evalKey
+	}
+
 	c := &Config{
 		Port:                envOr("PORT", "8080"),
 		DBPath:              envOr("DB_PATH", "./training.db"),
@@ -31,9 +47,11 @@ func Load() (*Config, error) {
 		TZ:                  os.Getenv("TZ"),
 		HermesURL:           os.Getenv("HERMES_API_URL"),
 		HermesKey:           os.Getenv("HERMES_API_KEY"),
-		LLMEvalURL:          os.Getenv("LLM_EVAL_API_URL"),
-		LLMEvalKey:          os.Getenv("LLM_EVAL_API_KEY"),
+		LLMEvalURL:          evalURL,
+		LLMEvalKey:          evalKey,
 		LLMEvalHistoryWeeks: envOrInt("LLM_EVAL_HISTORY_WEEKS", 8),
+		LLMConsultURL:       consultURL,
+		LLMConsultKey:       consultKey,
 	}
 	if c.APIKey == "" {
 		return nil, fmt.Errorf("API_KEY is required")

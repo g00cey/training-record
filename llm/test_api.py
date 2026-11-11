@@ -9,6 +9,7 @@ import urllib.error
 BASE_URL = "http://localhost:8646"
 API_KEY = os.environ.get("SPIN_EXTRACT_API_KEY", "")
 EVAL_API_KEY = os.environ.get("TRAINING_EVAL_API_KEY", "")
+CONSULT_API_KEY = os.environ.get("TRAINING_CONSULT_API_KEY", "") or EVAL_API_KEY
 
 
 def test_health():
@@ -293,6 +294,64 @@ def test_eval_empty_body():
         return False
 
 
+def test_consult_auth_no_token():
+    """Test POST /consult-training without Authorization header."""
+    print("=== Test: Consult-training auth failure (no token) ===")
+    try:
+        req = urllib.request.Request(
+            f"{BASE_URL}/consult-training",
+            data=json.dumps({"goal": "test"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            print(f"  Status: {resp.status}")
+            return False
+    except urllib.error.HTTPError as e:
+        data = json.loads(e.read())
+        print(f"  Status: {e.code}")
+        print(f"  Response: {json.dumps(data, indent=2)}")
+        want = 503 if not CONSULT_API_KEY else 401
+        assert e.code == want
+        print("  ✓ PASS\n")
+        return True
+    except Exception as e:
+        print(f"  ✗ FAIL: {e}\n")
+        return False
+
+
+def test_consult_missing_goal():
+    """Test POST /consult-training with missing goal."""
+    print("=== Test: Consult-training missing goal ===")
+    if not CONSULT_API_KEY:
+        print("  (skipped: TRAINING_CONSULT_API_KEY not set)\n")
+        return True
+    try:
+        req = urllib.request.Request(
+            f"{BASE_URL}/consult-training",
+            data=json.dumps({"goal": ""}).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {CONSULT_API_KEY}"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            print(f"  Status: {resp.status}")
+            return False
+    except urllib.error.HTTPError as e:
+        data = json.loads(e.read())
+        print(f"  Status: {e.code}")
+        print(f"  Response: {json.dumps(data, indent=2)}")
+        assert e.code == 400
+        assert data["error"] == "BadRequest"
+        print("  ✓ PASS\n")
+        return True
+    except Exception as e:
+        print(f"  ✗ FAIL: {e}\n")
+        return False
+
+
 def test_not_found():
     """Test GET /nonexistent endpoint."""
     print("=== Test 7: Not found ===")
@@ -356,6 +415,8 @@ if __name__ == "__main__":
     results.append(test_eval_auth_wrong_token())
     results.append(test_eval_invalid_period_type())
     results.append(test_eval_empty_body())
+    results.append(test_consult_auth_no_token())
+    results.append(test_consult_missing_goal())
     results.append(test_not_found())
     results.append(test_method_not_allowed())
 

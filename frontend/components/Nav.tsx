@@ -9,6 +9,7 @@ const LINKS = [
   { href: '/calendar', label: 'カレンダー' },
   { href: '/volume', label: 'ボリューム' },
   { href: '/routine', label: 'プリセット' },
+  { href: '/consultations', label: '相談履歴' },
   { href: '/settings', label: '設定' },
 ];
 

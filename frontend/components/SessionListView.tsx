@@ -13,6 +13,7 @@ import type {
 import { guessKind, KIND_BADGE_CLASS, KIND_LABEL } from '@/lib/domain';
 import { longLabel } from '@/lib/date';
 import { AdviceCard } from './AdviceCard';
+import { ConsultationModal } from './ConsultationModal';
 import { SpinNotes } from './SpinNotes';
 import {
   Button,
@@ -41,6 +42,7 @@ function buildQuery(from: string, to: string): string {
 }
 
 export function SessionListView() {
+  const [consultationOpen, setConsultationOpen] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [applied, setApplied] = useState({ from: '', to: '' });
@@ -127,6 +129,22 @@ export function SessionListView() {
           </Button>
         </div>
       </Card>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setConsultationOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-brand-200 bg-brand-50 px-3.5 py-1.5 text-sm font-medium text-brand-700 shadow-sm transition hover:bg-brand-100"
+        >
+          <span>💬</span>
+          <span>AIにトレーニングを相談する</span>
+        </button>
+      </div>
+
+      <ConsultationModal
+        isOpen={consultationOpen}
+        onClose={() => setConsultationOpen(false)}
+      />
 
       <AdviceCard compact />
 
