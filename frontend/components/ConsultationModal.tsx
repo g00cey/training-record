@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiMutate, fetcher } from '@/lib/client';
 import type { ConsultationDetail } from '@/lib/types';
-import { Button, ErrorBox, Field, Spinner } from './ui';
+import { Markdown } from './Markdown';
+import { Button, ErrorBox, Field, Spinner, cn } from './ui';
 
 interface ConsultationModalProps {
   isOpen: boolean;
@@ -206,13 +207,17 @@ export function ConsultationModal({
                       {m.role === 'user' ? 'あなた' : 'AIトレーナー'}
                     </span>
                     <div
-                      className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-4 py-2.5 text-sm leading-relaxed ${
+                      className={cn(
+                        'rounded-lg px-4 py-2.5 text-sm leading-relaxed',
                         m.role === 'user'
-                          ? 'bg-brand-600 text-white'
-                          : 'border border-gray-200 bg-gray-50 text-gray-800'
-                      }`}
+                          ? 'max-w-[85%] bg-brand-600 text-white'
+                          : 'max-w-[92%] border border-gray-200 bg-gray-50 text-gray-800',
+                      )}
                     >
-                      {m.content}
+                      <Markdown
+                        content={m.content}
+                        variant={m.role === 'user' ? 'inverse' : 'light'}
+                      />
                     </div>
                   </div>
                 ))}
