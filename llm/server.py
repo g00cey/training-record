@@ -35,9 +35,9 @@ HOST = os.environ.get("SPIN_EXTRACT_HOST", "0.0.0.0")
 TIMEOUT_SECONDS = 90
 
 # Lemonade Server（OpenAI 互換 API）の Gemma-4-12B-it-MTP-GGUF（llama.cpp）を使用
-DEFAULT_MODEL = "Gemma-4-12B-it-MTP-GGUF"
+DEFAULT_MODEL = "gemma4-it-12b-FLM"
 # LLM トレーニング評価（テキストのみ）は gpt-oss-20b-GGUF-MXFP4 を使用
-DEFAULT_EVAL_MODEL = "gpt-oss-20b-GGUF-MXFP4"
+DEFAULT_EVAL_MODEL = "gpt-oss-20b-FLM"
 LEMONADE_BASE_URL = os.environ.get("LEMONADE_BASE_URL", "http://172.16.1.20:13305/api/v1").rstrip("/")
 
 # ── 環境変数読み込み ──────────────────────────────────────────────────
