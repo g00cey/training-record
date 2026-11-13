@@ -5,8 +5,42 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 
 // AI 相談の回答など、マークダウンで返るテキストを描画するための共通コンポーネント。
-// GFM 表（メニュー案の「種目 | 重量 | 回数 | セット」等）と改行を維持する。
+// GFM 表（メニュー案の「種目 | 重量 | 回数 | セット」等）と改行（`<br>` を含む）を維持する。
 // variant: 'light' は白〜グレー背景、'inverse' はブランド色背景（白文字）で使う。
+
+interface MdastNode {
+  type: string;
+  value?: string;
+  children?: MdastNode[];
+}
+
+const BR_ONLY_HTML_RE = /^(?:\s*<br\s*\/?>\s*)+$/i;
+const BR_TAG_RE = /<br\s*\/?>/gi;
+
+// マークダウン中の生 HTML `<br>` / `<br/>` / `<br />`（表セル内を含む）を mdast の break ノードに変換する。
+// react-markdown は既定で生 HTML を無視するため、これがないと `<br>` 箇所が改行されない。
+function replaceBrHtmlNodes(node: MdastNode): void {
+  if (!node.children) return;
+  const nextChildren: MdastNode[] = [];
+  for (const child of node.children) {
+    if (child.type === 'html' && child.value && BR_ONLY_HTML_RE.test(child.value)) {
+      const count = child.value.match(BR_TAG_RE)?.length ?? 1;
+      for (let i = 0; i < count; i++) {
+        nextChildren.push({ type: 'break' });
+      }
+      continue;
+    }
+    replaceBrHtmlNodes(child);
+    nextChildren.push(child);
+  }
+  node.children = nextChildren;
+}
+
+function remarkBr() {
+  return (tree: MdastNode) => {
+    replaceBrHtmlNodes(tree);
+  };
+}
 
 function buildComponents(inverse: boolean): Components {
   return {
@@ -179,7 +213,7 @@ export function Markdown({
   const components = buildComponents(variant === 'inverse');
   return (
     <MarkdownRenderer
-      remarkPlugins={[remarkGfm, remarkBreaks]}
+      remarkPlugins={[remarkGfm, remarkBreaks, remarkBr]}
       components={components}
     >
       {content}
