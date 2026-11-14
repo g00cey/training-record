@@ -16,12 +16,12 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
-import io
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Any, Optional
 
 try:
@@ -955,13 +955,12 @@ def main():
     if not TRAINING_CONSULT_API_KEY:
         print("WARN: TRAINING_CONSULT_API_KEY is not set — POST /consult-training will return 503", file=sys.stderr)
 
-    server = HTTPServer((HOST, PORT), ExtractionHandler)
+    server = ThreadingHTTPServer((HOST, PORT), ExtractionHandler)
 
     # グレースフルシャットダウン
     def signal_handler(signum, frame):
         print(f"\nReceived signal {signum}, shutting down...")
-        server.shutdown()
-        sys.exit(0)
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
