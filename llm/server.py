@@ -14,6 +14,7 @@ import base64
 import io
 import json
 import os
+import re
 import signal
 import sys
 import threading
@@ -72,13 +73,13 @@ EXTRACTION_PROMPT = """スピンバイクの運動結果画面（スクリーン
 - 時間が「目標」と「完了」にある場合、使うのは「完了」
 - 「心拍数 (BPM)」欄の大きな数字 2 つ: 左が平均心拍、右（最大 BPM）が最大心拍。グラフの目盛り数字は使わない
 - 下部のゾーン別棒グラフ右端の時間を上から順に ウォームアップ / インテンシブ / 有酸素 / 無酸素 / 最大酸素摂取量 に対応させる（ゾーン名は縦に折り返されることがある）。5 行すべてに時間がある。棒が空の行の時間は 00:00:00 で、5 つの合計は完了時間とほぼ一致する
-- 時間はすべて画面の表記のまま文字列で書き写す（換算しない）
+- 時間は数字とコロン（hh:mm:ss 等）のみ文字列で書き写す（換算しない）。ゾーン名や記号・改行は含めず、読めなければ null
 - 運動時間は completedTime に「完了」の時間を書き写す（無ければ null）
 - 画面にない項目は null。推測しない。確信が低い項目名は uncertainFields に入れる
 - 日付と RPE は抽出しない
 
 改行・装飾なしの 1 行 JSON のみ返す:
-{"completedTime":"画面の表記のまま"|null,"avgHeartRate":int|null,"maxHeartRate":int|null,"distanceKm":float|null,"hrZones":{"ウォームアップ":"画面の表記"|null,"インテンシブ":"画面の表記"|null,"有酸素":"画面の表記"|null,"無酸素":"画面の表記"|null,"最大酸素摂取量":"画面の表記"|null},"freeNotes":"消費カロリー等の補足。無ければ空文字","uncertainFields":[]}"""
+{"completedTime":"hh:mm:ss"|null,"avgHeartRate":int|null,"maxHeartRate":int|null,"distanceKm":float|null,"hrZones":{"ウォームアップ":"hh:mm:ss"|null,"インテンシブ":"hh:mm:ss"|null,"有酸素":"hh:mm:ss"|null,"無酸素":"hh:mm:ss"|null,"最大酸素摂取量":"hh:mm:ss"|null},"freeNotes":"消費カロリー等の補足。無ければ空文字","uncertainFields":[]}"""
 
 
 # ── トレーニング評価プロンプト ────────────────────────────────────────
@@ -249,20 +250,8 @@ def call_vision_llm(image_base64: str, mime_type: str) -> dict:
     except (KeyError, IndexError):
         raise RuntimeError(f"Unexpected API response: {json.dumps(result)[:500]}")
 
-    # JSON をパース（コードブロック対応）
-    content = content.strip()
-    if content.startswith("```"):
-        # コードブロックを除去
-        lines = content.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        content = "\n".join(lines).strip()
-
-    try:
-        extracted = json.loads(content)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nContent: {content[:500]}")
-
-    return extracted
+    # JSON をパース（コードブロック・軽微な構文崩れ対応）
+    return parse_vision_json(content)
 
 
 def call_text_llm(prompt: str) -> dict:
@@ -335,6 +324,117 @@ def call_text_llm(prompt: str) -> dict:
             raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nContent: {content[:500]}")
 
     return evaluated
+
+
+_JSON_STR_RE = r'"[^"\\]*(?:\\.[^"\\]*)*"'
+# 1 つのキーに対して `"val1": "val2": "val3"` のようにコロンが連鎖した場合、最後の値だけを残す。
+# 文字列リテラル境界に揃えるため、通常の文字列リテラルも同一パスで消費する。
+_KEY_CHAINED_OR_STR_RE = re.compile(
+    rf'({_JSON_STR_RE})\s*:\s*(?:{_JSON_STR_RE}\s*:\s*)+({_JSON_STR_RE}|null\b|true\b|false\b|-?\d+(?:\.\d+)?)'
+    rf'|({_JSON_STR_RE})'
+)
+# キーの直後にコロンが欠落しているケース（例: `"uncertainFields":` が `"uncertainFields[]` になる等）
+_STR_OR_MISSING_COLON_RE = re.compile(
+    rf'({_JSON_STR_RE})(?:\s*([\[{{]|null\b|true\b|false\b|-?\d))?'
+)
+_UNCLOSED_KEY_COLON_RE = re.compile(
+    r'"(completedTime|avgHeartRate|maxHeartRate|distanceKm|hrZones|freeNotes|uncertainFields)\s*([\[{])'
+)
+_CONTROL_CHARS_RE = re.compile(r'[\x00-\x1f]+')
+
+
+def sanitize_vision_json(content: str) -> str:
+    """Vision LLM 出力のコードブロックや典型的な JSON 構文崩れを修復する。"""
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+
+    # 先頭・末尾の余分なテキストを除去（最初の { から最後の } まで）
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
+
+    # 生の制御文字（改行・タブ等）を空白に置換（1 行 JSON 前提）
+    text = _CONTROL_CHARS_RE.sub(" ", text)
+    # 閉じクォート＋コロン欠落の既知キー修復（例: `"uncertainFields[]` → `"uncertainFields":[]`）
+    text = _UNCLOSED_KEY_COLON_RE.sub(r'"\1":\2', text)
+    # 多重コロン連鎖の縮約
+    text = _KEY_CHAINED_OR_STR_RE.sub(
+        lambda m: f"{m.group(1)}: {m.group(2)}" if m.group(1) is not None else m.group(0),
+        text,
+    )
+    # クォート済みキー直後のコロン欠落補完
+    text = _STR_OR_MISSING_COLON_RE.sub(
+        lambda m: f"{m.group(1)}:{m.group(2)}" if m.group(2) is not None else m.group(0),
+        text,
+    )
+    return text
+
+
+def _fallback_extract_vision_fields(content: str) -> Optional[dict]:
+    """JSON パース不能時に既知フィールドを正規表現で部分救済する。"""
+    data: dict[str, Any] = {}
+    found_any = False
+
+    m = re.search(r'"completedTime"\s*:?\s*(?:"([^"]*)"|null\b)', content)
+    if m:
+        data["completedTime"] = m.group(1)
+        found_any = True
+
+    for int_field in ("avgHeartRate", "maxHeartRate"):
+        m = re.search(rf'"{int_field}"\s*:?\s*(\d+|null\b)', content)
+        if m:
+            data[int_field] = None if m.group(1) == "null" else int(m.group(1))
+            found_any = True
+
+    m = re.search(r'"distanceKm"\s*:?\s*(\d+(?:\.\d+)?|null\b)', content)
+    if m:
+        data["distanceKm"] = None if m.group(1) == "null" else float(m.group(1))
+        found_any = True
+
+    hr_zones: dict[str, Optional[str]] = {}
+    for zone in VALID_ZONE_KEYS:
+        m = re.search(rf'"{re.escape(zone)}"\s*:?\s*(?:"([^"]*)"|null\b)', content)
+        if m:
+            hr_zones[zone] = m.group(1)
+            found_any = True
+    if hr_zones:
+        data["hrZones"] = hr_zones
+
+    m = re.search(r'"freeNotes"\s*:?\s*"([^"]*)"', content)
+    if m:
+        data["freeNotes"] = m.group(1)
+        found_any = True
+
+    m = re.search(r'"uncertainFields"\s*:?\s*\[([^\]]*)\]', content)
+    if m:
+        data["uncertainFields"] = re.findall(r'"([^"]+)"', m.group(1))
+        found_any = True
+
+    return data if found_any else None
+
+
+def parse_vision_json(content: str) -> dict:
+    """Vision LLM のレスポンステキストを修復しつつ JSON 辞書としてパースする。"""
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("LLM returned empty content")
+
+    sanitized = sanitize_vision_json(content)
+    try:
+        parsed = json.loads(sanitized)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError as e:
+        fallback = _fallback_extract_vision_fields(sanitized)
+        if fallback is not None:
+            print(f"WARN: vision JSON repaired via fallback parser ({e})", file=sys.stderr)
+            return fallback
+        raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nContent: {content[:500]}")
+
+    raise RuntimeError(f"LLM response JSON is not an object\nContent: {content[:500]}")
 
 
 def extract_eval_json(content: str) -> Optional[dict]:
@@ -432,7 +532,8 @@ def validate_and_normalize(data: dict) -> dict:
 
     # 運動時間: LLM は画面表記のまま completedTime（hh:mm:ss 等）を返し、ここで分に換算する。
     # 旧形式（durationMinutes を直接返す）もフォールバックとして受け付ける
-    completed = normalize_time(data.get("completedTime"))
+    raw_completed = data.get("completedTime")
+    completed = normalize_time(raw_completed)
     if completed:
         result["durationMinutes"] = int(completed.split(":")[0])
 
@@ -456,6 +557,7 @@ def validate_and_normalize(data: dict) -> dict:
             pass
 
     # 心拍ゾーン
+    zone_had_invalid = False
     hr_zones = data.get("hrZones")
     if isinstance(hr_zones, dict):
         for key, val in hr_zones.items():
@@ -466,6 +568,8 @@ def validate_and_normalize(data: dict) -> dict:
                 normalized_time = normalize_time(val)
                 if normalized_time and validate_time_format(normalized_time):
                     result["hrZones"][normalized_key] = normalized_time
+                elif isinstance(val, str) and val.strip():
+                    zone_had_invalid = True
 
     # フリーノート
     notes = data.get("freeNotes", "")
@@ -478,6 +582,17 @@ def validate_and_normalize(data: dict) -> dict:
         result["uncertainFields"] = [
             f for f in uncertain if f in VALID_UNCERTAIN_FIELDS
         ]
+
+    if zone_had_invalid and "hrZones" not in result["uncertainFields"]:
+        result["uncertainFields"].append("hrZones")
+
+    if (
+        isinstance(raw_completed, str)
+        and raw_completed.strip()
+        and result["durationMinutes"] is None
+        and "durationMinutes" not in result["uncertainFields"]
+    ):
+        result["uncertainFields"].append("durationMinutes")
 
     # 整合性チェック: ゾーン合計が運動時間を明らかに超えるなら誤読の疑いがある。
     # 値は変えず、確認を促すために uncertainFields へ hrZones を足す
