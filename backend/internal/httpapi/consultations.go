@@ -73,7 +73,7 @@ func mapLLMConsultError(err error) error {
 	if errors.As(err, &ce) {
 		switch ce.Kind {
 		case llmconsult.ErrTimeout:
-			return &httpError{http.StatusGatewayTimeout, "llm_timeout", "トレーニング相談がタイムアウトしました（90 秒）"}
+			return &httpError{http.StatusGatewayTimeout, "llm_timeout", "トレーニング相談がタイムアウトしました（4 分）"}
 		case llmconsult.ErrHTTP:
 			if ce.Status == 503 {
 				return &httpError{http.StatusServiceUnavailable, "llm_not_configured", "トレーニング相談は未設定です"}

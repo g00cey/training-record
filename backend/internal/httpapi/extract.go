@@ -73,7 +73,7 @@ func (h *Handlers) spinExtract(w http.ResponseWriter, r *http.Request) error {
 		if errors.As(err, &he) {
 			switch he.Kind {
 			case hermes.ErrTimeout:
-				return &httpError{http.StatusGatewayTimeout, "hermes_timeout", "解析がタイムアウトしました（90 秒）"}
+				return &httpError{http.StatusGatewayTimeout, "hermes_timeout", "解析がタイムアウトしました（4 分）"}
 			case hermes.ErrHTTP:
 				return &httpError{
 					http.StatusBadGateway, "hermes_error",

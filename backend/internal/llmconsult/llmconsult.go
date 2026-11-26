@@ -16,7 +16,7 @@ import (
 )
 
 // DefaultTimeout bounds a single consultation call.
-const DefaultTimeout = 90 * time.Second
+const DefaultTimeout = 4 * time.Minute
 
 // ErrorKind categorises a client failure for transport-layer mapping.
 type ErrorKind int

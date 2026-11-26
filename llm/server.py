@@ -33,7 +33,7 @@ except ImportError:  # Pillow が無い環境では縮小せず原寸のまま�
 # ── 設定 ───────────────────────────────────────────────────────────────
 PORT = int(os.environ.get("SPIN_EXTRACT_PORT", 8646))
 HOST = os.environ.get("SPIN_EXTRACT_HOST", "0.0.0.0")
-TIMEOUT_SECONDS = 90
+TIMEOUT_SECONDS = 240
 
 # Lemonade Server（OpenAI 互換 API）の Gemma-4-12B-it-MTP-GGUF（llama.cpp）を使用
 DEFAULT_MODEL = "gemma4-it-12b-FLM"

@@ -174,7 +174,7 @@ func runEvaluateTraining() int {
 	svc := service.New(st)
 	client := llmeval.New(llmeval.Config{URL: cfg.LLMEvalURL, APIKey: cfg.LLMEvalKey})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 13*time.Minute)
 	defer cancel()
 
 	biweekly, bimonthly, errs := svc.RunTrainingEvaluations(ctx, client, time.Now().In(domain.JST), cfg.LLMEvalHistoryWeeks)

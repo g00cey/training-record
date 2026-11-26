@@ -26,8 +26,8 @@ import (
 )
 
 // DefaultTimeout bounds a single Hermes extraction call. The nginx route for
-// /bff/spin-extract allows 120s, so keep the client below it.
-const DefaultTimeout = 90 * time.Second
+// /bff/spin-extract allows 270s, so keep the client below it.
+const DefaultTimeout = 4 * time.Minute
 
 // ErrorKind categorises a client failure for transport-layer mapping.
 type ErrorKind int
